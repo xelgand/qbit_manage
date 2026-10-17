@@ -34,8 +34,8 @@ that already exist.
    sample config, the setup docs and the web UI schema. Makes the opt-in expressible; alone it
    changes no behavior.
 2. **Relocation core.** Implement the guarded relocation routine and its unit tests, including
-   the cross-seed detection that must work without the full torrent file map. Makes relocation
-   correct in isolation.
+   the cross-seed detection that must work during `cat_update` runs, where the full torrent file
+   map is not built today. Makes relocation correct in isolation.
 3. **Command integration.** Wire the routine into `cat_update` and `cat_change` with per-command
    flags, dry-run support and per-torrent failure isolation. Delivers the observable behavior of
    the spec.
