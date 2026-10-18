@@ -36,8 +36,10 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 - RF-3: Relocation is guarded: it never moves a torrent whose files are shared with cross-seed
   siblings, never resolves an ambiguous configured path (wildcard entries, `Uncategorized`
   multi-path lists), does nothing when the torrent already sits at the configured path, applies
-  only to completed torrents, and never targets a torrent whose location qBittorrent itself
-  manages through Automatic Torrent Management.
+  only to completed torrents, and never targets a torrent whose location qBittorrent governs — or
+  will govern once this run has made its category change — through Automatic Torrent Management,
+  whether that comes from the torrent's own setting or from the `force_auto_tmm` setting the
+  category change applies.
 - RF-4: Relocation honors `dry_run` (logs the intended move, performs none) and a relocation
   failure on one torrent is logged and notified without aborting the rest of the run.
 - RF-5: The new configuration keys are registered through the existing `check_for_attribute`
@@ -53,10 +55,11 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 - RNF-1: Backwards compatibility: with the new keys absent or disabled, no relocation call is
   ever made and existing category behavior is unchanged.
 - RNF-2: Observability: every relocation, every refusal and every configuration-level skip
-  (ambiguous path, category absent from `cat:`) produces a log line naming the torrent and the
-  reason, and reaches the run's notification payload; per-torrent no-ops that are normal
-  (already in place, Automatic Torrent Management, incomplete) are logged and counted in the run
-  summary instead of notified one by one, so a large library cannot produce a notification storm.
+  (ambiguous path, category absent from `cat:`, Automatic Torrent Management, whether the
+  torrent's own or the one `force_auto_tmm` applies) produces a log line naming the torrent and
+  the reason, and reaches the run's notification payload; per-torrent no-ops that are normal
+  (already in place, incomplete) are logged and counted in the run summary instead of notified one
+  by one, so a large library cannot produce a notification storm.
 
 ## Included scope
 
@@ -127,6 +130,11 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 - AC-13 (`RF-3`): Given Automatic Torrent Management is enabled for a torrent, when relocation is
   evaluated, then no location change is requested for it and the skip is logged with the
   Automatic Torrent Management reason.
+- AC-14 (`RF-3`): Given `force_auto_tmm` is enabled and the torrent carries no ignore tag from
+  `force_auto_tmm_ignore_tags`, when the category-change path evaluates relocation, then no
+  location change is requested for that torrent — the category change hands its location to
+  qBittorrent — and the skip is logged and notified with that reason. In the alignment path, which
+  never enables Automatic Torrent Management itself, the torrent's own current setting governs.
 
 ## Constraints
 
@@ -135,9 +143,15 @@ Without the opt-in, behavior is byte-for-byte identical to today.
   `root_dir`/`remote_dir` mapping and must not leak into relocation targets.
 - The relocation guard for cross-seeds must work during `cat_update` runs, where the full
   torrent file map (`torrentfiles`) is not built today.
-- Automatic Torrent Management is a client-side location authority: relocation never contends
-  with it, so torrents under it are out of scope (AC-13) and no sequence of category change and
-  location change may race the client's own move.
+- Automatic Torrent Management is a client-side location authority. Relocation never contends with
+  it, and the contention is reachable from this project's own code: `update_cat`
+  (`modules/core/category.py:122-128`) enables Automatic Torrent Management for ATM-disabled
+  torrents whenever `force_auto_tmm` is on and the torrent carries no ignore tag. The guard
+  therefore evaluates the state the category change *produces*, not only the state it finds
+  (AC-13, AC-14): the category-change path treats a torrent as ATM-governed when its own setting is
+  on **or** this run's category change will turn it on; the alignment pass, which never touches
+  Automatic Torrent Management, uses the torrent's current setting alone and runs after
+  `category()`, so it sees any flip that already happened.
 - Python 3.10+, Ruff lint/format, and the repository's test-factory patterns apply (AGENTS.md).
 - All changes land through pull requests targeting `develop` (AGENTS.md branch model).
 

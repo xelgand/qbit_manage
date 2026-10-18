@@ -69,15 +69,14 @@ inside commands that already exist.
 
 ## Architecture decisions
 
-- ADR: where does the opt-in live — a global `settings` key, a per-`cat_change`-mapping key in
-  the extended form, or a combination — and what are the exact key names?
-- ADR: on a guarded skip (for example a cross-seed sibling), is the category change still
-  applied or is the torrent left untouched?
-- ADR: how is cross-seed sharing detected during `cat_update`, where the full torrent file map
-  is not built today — build the file map for these commands, or use a cheaper save-path-equality
-  scan?
-- ADR: does relocation guard against breaking external hardlinks, and at what cost in filesystem
-  access?
+Each of these is decided and carries an `accepted` ADR in `adr/`; the list stays for traceability
+from the plan to the decisions.
+
+- ADR-001: two global `settings` keys, `cat_update_relocate` and `cat_change_relocate`.
+- ADR-002: a cross-seed guard refuses the whole torrent; every other guard is a no-op that leaves
+  the category change alone.
+- ADR-003: lazy per-candidate cross-seed detection with a per-run cache.
+- ADR-004: no hardlink check; the cross-filesystem limitation is documented.
 
 ## Risks
 
@@ -88,10 +87,12 @@ inside commands that already exist.
   need the `root_dir`/`remote_dir` mapping. Reduced by resolving targets exclusively from the
   `cat:` configuration and covering the mapping in unit tests.
 - **Interaction with Automatic Torrent Management.** With ATM enabled, qBittorrent itself relocates
-  a torrent to its own per-category save path when the category changes. Reduced by excluding
-  ATM-managed torrents from relocation (AC-13), so no category change and location change is ever
-  sequenced against the client's own move, and by documenting that the client's category path
-  governs for them.
+  a torrent to its own per-category save path when the category changes — and this project can turn
+  it on during that very change: `update_cat` enables ATM for ATM-disabled torrents when
+  `force_auto_tmm` is set and the torrent carries no ignore tag (`modules/core/category.py:122-128`).
+  Reduced by evaluating the guard against the state the category change produces, so those torrents
+  are never relocated (AC-13, AC-14), and by documenting that the client's category path governs
+  for them.
 - **Widened blast radius from the alignment pass.** RF-6 makes `cat_update` touch torrents it never
   touched before, on a path where the category is trusted as correct. Reduced by keeping the pass
   behind the same opt-in key, by the shared guards, by dry-run support and by per-torrent failure
@@ -99,4 +100,5 @@ inside commands that already exist.
 
 ## Open questions
 
-- None blocks the proposal; the spec's open questions are the ADRs listed above.
+- None. ADR-001 to ADR-004 are decided and accepted; the spec's Open questions section records the
+  same state. A new question opens a new ADR.
