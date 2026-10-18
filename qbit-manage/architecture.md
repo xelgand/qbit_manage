@@ -189,11 +189,16 @@ changes and no `set_location` is issued (AC-8).
   the same numbers as the summary notification.
 - Notifications reuse the existing pipeline: attributes appended to `self.notify_attr` with
   `function: "cat_update"` and a title that distinguishes a relocation from a refusal — those two
-  are the only classes that go through grouping. Each attribute carries `torrent_category`,
-  `torrent_tag`, `torrent_tracker` and `notifiarr_indexer` because `group_notifications_by_key`
-  indexes `attr["torrent_category"]` when a run exceeds the grouping limit
-  (`modules/webhooks.py:195-249`); an attribute missing it would raise inside the notification path,
-  not in the relocation path.
+  are the only classes that go through grouping. They reuse the attribute shape already built at
+  `modules/core/category.py:158-172`, so each one carries `title`, `body`, a non-empty `torrents`
+  list holding the acted-on torrent's name, `torrent_category`, `torrent_tag`, `torrent_tracker`
+  and `notifiarr_indexer`. All four of those last fields are required by the grouping path and the
+  list is required by all of it: `notify` reads `group_attr[group]["torrents"]` and rewrites the
+  body only when the bucket holds exactly one torrent (`modules/webhooks.py:212`, `:218-226`),
+  `group_notifications_by_key` indexes `attr.get("torrents", [None])[0]` for every payload entry
+  (`:264`), and it indexes `attr["torrent_category"]` to pick the bucket. An attribute built by the
+  new code that omitted any of them would raise `KeyError` inside the notification path, not in the
+  relocation path.
 - Relocated and refused torrents are appended to `self.torrents_updated` alongside category
   updates, because that list is what decides grouping (`modules/webhooks.py:196`) — the run-end
   payload for a relocation-heavy alignment run would otherwise be one notification per torrent.
