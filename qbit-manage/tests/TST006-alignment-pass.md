@@ -39,8 +39,13 @@ covering it writes no category. It also pins the call-site order that prevents a
 4. A torrent already at its configured path: assert no call and the already-in-place count.
 5. Order: construct a `Category` whose torrent is a `cat_change` candidate and assert it is
    relocated once, to the new category's path.
-6. Payload: assert the pass's relocations and skips reach the run payload built after it.
-7. Disabled: with `cat_update_relocate` false, assert the pass is not invoked and no extra client
+6. Dry run: with the pass enabled and `dry_run` active, assert the intended move or refusal is
+   logged and no `set_location` was called.
+7. Summary: with only `cat_change_relocate` enabled and the category-change path having counted a
+   skip, assert exactly one summary attribute was sent through `config.send_notifications`; with no
+   skip counted, assert none was sent.
+8. Payload: assert the pass's relocations and skips reach the run payload built after it.
+9. Disabled: with `cat_update_relocate` false, assert the pass is not invoked and no extra client
    list is fetched.
 
 ## Expected result

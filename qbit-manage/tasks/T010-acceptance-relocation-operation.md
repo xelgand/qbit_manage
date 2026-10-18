@@ -16,6 +16,7 @@ covers:
   - AC-11
 depends_on:
   - T006
+  - T001
 execution_budget:
   target_minutes: 45
 allowed_paths:

@@ -39,11 +39,15 @@ outside that category's configured path is relocated to it, without its category
 - `align_locations()`: iterate the client's torrents with the same status filter the command uses,
   restricted to `self.hashes` when the run was invoked with hashes, take the ones with a non-empty
   category other than the `Uncategorized` mapping, evaluate `relocation_plan` with the alignment
-  path selected, and relocate or skip accordingly. No `set_category` call exists in this pass.
-- Call it from `Category.__init__` after `category()` and after `change_categories()`, and before
-  the notification call at `modules/core/category.py:25`.
-- Log a closing summary line with the counts per reason, matching the summary notification T004
-  sends.
+  path selected, and relocate or skip accordingly. No `set_category` call exists in this pass. Under
+  `self.config.dry_run` the pass still evaluates and logs the intended move or refusal but calls
+  neither `relocate` nor any other client write, exactly as the category-change path does.
+- Wire both calls from `Category.__init__`, after `category()` and after `change_categories()`, and
+  before the notification call at `modules/core/category.py:25`:
+  - `align_locations()` only when `cat_update_relocate` is enabled;
+  - `relocation_skip_summary()` (T004) whenever either relocation key is enabled, so a run that
+    enables only `cat_change_relocate` still reports the skips its category-change path collected.
+- Log a closing summary line with the counts per reason from the same counters the summary uses.
 - Unit tests in `tests/core/test_category_relocation_alignment.py`.
 
 ## Exclusions
@@ -65,6 +69,10 @@ outside that category's configured path is relocated to it, without its category
   place.
 - The pass runs after `category()` and after `change_categories()`, and its notifications and
   counters are included in the run payload built at `modules/core/category.py:25`.
+- Under `dry_run` the pass logs the intended move or the refusal and calls `set_location` for
+  nothing.
+- A run with `cat_change_relocate` enabled and `cat_update_relocate` disabled sends exactly one skip
+  summary attribute when its category-change path counted a skip, and none when it counted none.
 - With `cat_update_relocate` disabled, the pass is not invoked at all and no extra client call is
   made (a torrent list is not fetched).
 

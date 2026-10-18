@@ -43,11 +43,17 @@ Feature: Operating the relocation feature
     Then no location change is requested for any torrent
     And the logged behavior matches the pre-feature behavior
 
-  Scenario: AC-8 a dry run reports the intended moves and refuses to make them
+  Scenario Outline: AC-8 a dry run reports the intended moves and refuses to make them
     Given dry_run is active and relocation is enabled
-    When a relocation would apply
+    And the relocation would apply through <entry point>
+    When the run proceeds
     Then the intended move is logged
     And no location change is requested
+
+    Examples:
+      | entry point           |
+      | the category change   |
+      | the alignment pass    |
 
   Scenario: AC-9 one failed relocation does not stop the run
     Given the relocation request fails for one torrent
@@ -67,6 +73,13 @@ Feature: Operating the relocation feature
     Then the log identifies each affected torrent with its reason
     And relocations and refusals each appear in the notification payload
     And every other skip appears in a single per-run summary entry carrying the count per reason
+
+  Scenario: AC-11 a run that enables only cat_change still reports its skips
+    Given cat_change_relocate is enabled and cat_update_relocate is disabled
+    And the category-change path skips torrents for at least one reason
+    When the run proceeds
+    Then a single per-run summary entry carries the count per reason
+    And the alignment pass did not run
 ```
 
 ## Expected result

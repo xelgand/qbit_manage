@@ -34,8 +34,9 @@ feature is invisible when the keys are off, which is the promise made to every e
 1. Relocate: with the key enabled, assert the recorded call order is `set_category` then
    `set_location` with the configured path.
 2. Refusal: assert neither call was made for the torrent, and the refusal reason was logged.
-3. No-op (already in place, incomplete, ambiguous path, ATM): assert `set_category` was called and
-   `set_location` was not.
+3. No-op (already in place, incomplete, ambiguous path, ATM): assert `set_category` was called,
+   `set_location` was not, and the skip was reported once with its reason (one log line, one reason
+   counter).
 4. Dry run: assert the intended move or refusal was logged and neither call was made.
 5. Disabled: with both keys absent, assert no `relocation_plan` call, no `set_location` ever, and
    the same log lines as the pre-change code for the same input.

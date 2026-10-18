@@ -43,12 +43,15 @@ ends with one summary entry carrying those counts.
   - on `False`: log and notify the failure with the torrent and the target, without counting a
     relocation, and let the run continue (never raise).
 - A refusal is logged and notified with the same attribute shape and a title marking it a refusal.
-- Per-reason counters for skips (ambiguous or absent configured path, incomplete, Automatic Torrent
-  Management, already in place), one log line per skipped torrent naming the torrent and the reason,
-  and one attribute per run at the end of the pass — sent with `self.config.send_notifications(attr)`
-  rather than through `self.notify_attr`, carrying `torrent_category`, `torrent_tag`,
+- `report_skip(torrent, plan)`: the single entry point every skip goes through, from either path —
+  one log line naming the torrent and the reason, and exactly one reason counter. It performs no
+  client call and sends nothing.
+- `relocation_skip_summary()`: sends the run's skip summary — one attribute with
+  `self.config.send_notifications(attr)`, carrying `torrent_category`, `torrent_tag`,
   `torrent_tracker` and `notifiarr_indexer` as `None`, a `torrents` list with the skipped names, a
-  summary title and a body listing the counts per reason.
+  summary title and a body listing the counts per reason — and sends nothing when no skip was
+  counted. It is a method of its own, so the run can emit it whenever either key is enabled, not
+  only when the alignment pass ran; T006 wires the call.
 - Leave `self.stats` untouched by relocations and skips: it keeps counting category updates only.
 - Unit tests in `tests/core/test_category_relocation_execution.py`, with the fake torrent recording
   `set_location` calls.
@@ -69,9 +72,14 @@ ends with one summary entry carrying those counts.
   relocation count, no entry in `self.torrents_updated`, and does not interrupt the caller.
 - A refusal produces a logged and notified refusal with its reason and does not count as a
   relocation.
-- A skip produces one log line naming the torrent and reason, increments exactly one reason counter,
-  and produces no per-torrent notification; the run's summary attribute reports all counters with
-  `None` for the category-derived fields, and is issued through `config.send_notifications`.
+- `report_skip` produces exactly one log line naming the torrent and the reason and increments
+  exactly one reason counter, for each skip reason, and never a per-torrent notification.
+- `relocation_skip_summary()` sends exactly one attribute through `config.send_notifications` with
+  `None` for the category-derived fields and the counts per reason, sends nothing when no skip was
+  counted, and can be called in a run where the alignment pass never ran.
+- `relocate` itself performs the client call unconditionally: the dry-run gate lives at the call
+  sites (T005 for the category-change path, T006 for the alignment pass), so this task's tests
+  assert the call and T005/T006 assert its absence under `dry_run`.
 - `self.stats` is unchanged by any of these paths.
 
 ## Verification
