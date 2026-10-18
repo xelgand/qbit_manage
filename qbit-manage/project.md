@@ -17,10 +17,13 @@ control_repository:
   workflow: pull-request
 adoption:
   id: adoption-2026-10
-  complete: false
+  complete: true
   source:
     kind: repository
     reference: https://github.com/xelgand/qbit_manage/tree/3984bbb8640e97fd943f997dcc83fc0c4a9d973b
+  pending: []
+  retired: []
+  continuing: []
 ---
 
 # qBit Manage
