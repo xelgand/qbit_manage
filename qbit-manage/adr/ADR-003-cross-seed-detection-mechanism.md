@@ -27,7 +27,7 @@ only when at least one command in `TORRENT_DICT_COMMANDS` is enabled (`qbittorre
 `cat_update` and `cat_change` are not in that list, so during a category-only run the map stays
 empty — it is initialized to `{}` and never filled (`qbittorrent.py:99`, `:122-127`). The existing
 guards cannot run on it either: `has_cross_seed` and `is_cross_seed` index
-`self.torrentfiles[full_path]` per file (`qbittorrent.py:263`, `:283`), which raises `KeyError` on
+`self.torrentfiles[full_path]` per file (`qbittorrent.py:266`, `:286`), which raises `KeyError` on
 an empty map. The relocation guard from RF-3 must decide whether another torrent owns the same
 files before calling `set_location`, which moves them on disk.
 
@@ -82,9 +82,9 @@ status.
 ## Decision
 
 Option C: lazy per-candidate detection. When relocation is enabled and a torrent is a candidate,
-fetch the file lists of that torrent and of the torrents sharing its `save_path`, cache them for
-the run, and treat a non-empty intersection of file paths as cross-seed sharing. Decided by the
-approver on 2026-10-18.
+fetch the file lists of that torrent and of the torrents whose `save_path` is equal to, an ancestor
+of, or a descendant of its own, cache them for the run, and treat a non-empty intersection of file
+paths as cross-seed sharing. Decided by the approver on 2026-10-18.
 
 Option A changes what a category-only run does for every user (RNF-1 forbids it) and pays one
 file-list call per torrent in the client on every run, whether or not relocation is on. Option B

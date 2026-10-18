@@ -93,11 +93,12 @@ qBittorrent path space, and `root_dir`/`remote_dir` mapping must not be applied 
 2. **Alignment pass** — a new pass over already-categorized torrents, running only when
    `cat_update_relocate` is enabled and only for completed, non-ATM torrents whose category has a
    literal configured path. It changes no category, so a refusal withholds the relocation alone. It
-   runs last in `Category.__init__` — after `category()` and after `change_categories()`
-   (`modules/core/category.py:23-25`) — so that: torrents that just received a category are
-   evaluated against it, a `cat_change` candidate is not first moved to its old category's path and
-   then to its new one, and any Automatic Torrent Management flip the run already made is visible
-   to rule 1. A torrent an earlier step already moved is a no-op by rule 4.
+   runs after `category()` and after `change_categories()`, and before the notification call at
+   `modules/core/category.py:25` — see the Operations section for why that last boundary matters —
+   so that: torrents that just received a category are evaluated against it, a `cat_change`
+   candidate is not first moved to its old category's path and then to its new one, and any
+   Automatic Torrent Management flip the run already made is visible to rule 1. A torrent an
+   earlier step already moved is a no-op by rule 4.
 
 ### Counters and statistics
 
@@ -184,20 +185,29 @@ changes and no `set_location` is issued (AC-8).
 ## Operations
 
 - Log lines via the existing `logger.print_line` with `self.config.loglevel`, one per relocation,
-  refusal and configuration-level skip; per-torrent no-ops at `DEBUG`, plus a per-run summary line
-  with counts, so a large library produces a constant number of visible lines.
+  refusal and skip; the per-run summary line reporting counts per reason closes the run and carries
+  the same numbers as the summary notification.
 - Notifications reuse the existing pipeline: attributes appended to `self.notify_attr` with
-  `function: "cat_update"` and a title that distinguishes relocation from refusal. Each attribute
-  carries `torrent_category`, `torrent_tag`, `torrent_tracker` and `notifiarr_indexer` because
-  `group_notifications_by_key` indexes `attr["torrent_category"]` when a run exceeds the grouping
-  limit (`modules/webhooks.py:195-249`); an attribute missing it would raise inside the
-  notification path, not in the relocation path.
+  `function: "cat_update"` and a title that distinguishes a relocation, a refusal and the skip
+  summary. Each attribute carries `torrent_category`, `torrent_tag`, `torrent_tracker` and
+  `notifiarr_indexer` because `group_notifications_by_key` indexes `attr["torrent_category"]` when
+  a run exceeds the grouping limit (`modules/webhooks.py:195-249`); an attribute missing it would
+  raise inside the notification path, not in the relocation path. The summary attribute carries the
+  category-independent value `None` for the tag, tracker and indexer fields, as the grouping path
+  already does for grouped entries (`modules/webhooks.py:229-232`).
 - Relocated and refused torrents are appended to `self.torrents_updated` alongside category
-  updates, because that list is what decides grouping (`modules/webhooks.py:196`): a relocation-only
-  run of a large library would otherwise emit one notification per torrent. `self.torrents_updated`
-  feeds only that decision in this class (`modules/core/category.py:25`), so the list's meaning
-  broadens from "torrents whose category changed" to "torrents this command acted on" while
-  `self.stats` — and therefore the run-end `torrents_categorized` count — keeps the narrow meaning.
+  updates, because that list is what decides grouping (`modules/webhooks.py:196`) — the run-end
+  payload for a relocation-heavy alignment run would otherwise be one notification per torrent.
+  `self.torrents_updated` feeds only that decision in this class (`modules/core/category.py:25`),
+  so the list's meaning broadens from "torrents whose category changed" to "torrents this command
+  acted on" while `self.stats` — and therefore the run-end `torrents_categorized` count — keeps the
+  narrow meaning.
+- Every other skip is never notified per torrent. The pass keeps counters per reason (ambiguous or
+  absent configured path, incomplete, Automatic Torrent Management, already in place) and appends a
+  single attribute at the end of the run with `function: "cat_update"`, a title that marks it a
+  summary, and a body listing the counts. That is what keeps a run whose every candidate was
+  skipped visible in notifications without a storm (RNF-2, AC-11), and it is the only notification
+  a torrent's own Automatic Torrent Management setting can produce (AC-13, AC-14).
 - No new webhook field, no new stats key: the run-end payload keeps its current shape.
 
 ## Verification

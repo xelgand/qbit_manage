@@ -17,9 +17,12 @@ updated: 2026-10-18
 
 `cat_update` assigns a category and `cat_change` switches one; today both do that with a single
 `torrent.set_category(...)` call (`modules/core/category.py:122`) and, when `force_auto_tmm` is on,
-`torrent.set_auto_management(True)` (`category.py:126`). The relocation feature adds guards that
-can refuse a move: cross-seed sharing (RF-3), an ambiguous configured path (RF-3), a torrent
-already in place (RF-3) and incomplete torrents (RF-3).
+`torrent.set_auto_management(True)` (`category.py:126`). The relocation feature adds four
+conditions that can stop a move — cross-seed sharing (RF-3), an ambiguous configured path (RF-3),
+a torrent already in place (RF-3) and incomplete torrents (RF-3) — and a fifth, Automatic Torrent
+Management, that is not in that list because it decides who owns the location rather than whether
+a move is allowed (AC-13, AC-14). Only the cross-seed condition is a refusal (see Decision below);
+the others are no-ops.
 
 The guards are evaluated inside a command whose primary job is the category change, so a refusal to
 move leaves a question: is the category change still applied? The answer matters beyond this
@@ -76,9 +79,9 @@ refusals either — they mean no relocation applies, so the category change proc
 today. Automatic Torrent Management is the one guard that can be classified either way by reading
 the list above, so it is stated explicitly: a torrent whose location the client governs, including
 one this run's `force_auto_tmm` is about to govern, is a configuration-level no-op — the category
-change is applied and the relocation is withheld and reported (AC-13, AC-14). Withholding the
-category change there would break the setting's purpose; moving the data there would contend with
-the client.
+change is applied, the relocation is withheld, and the skip is logged and counted in the run's skip
+summary (AC-13, AC-14). Withholding the category change there would break the setting's purpose;
+moving the data there would contend with the client.
 
 ## Consequences
 
