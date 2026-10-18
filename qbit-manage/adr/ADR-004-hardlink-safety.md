@@ -24,9 +24,10 @@ torrent's copy is a separate file. Subsequent seeding then writes to a different
 media library and the two silently diverge.
 
 The repository already contains the cost model for the opposite direction: the `nohardlinks`
-feature stats files under `root_dir` mapped to `remote_dir` (`modules/util.py:1539-1578`) to detect
-them. When relocation is enabled, the same class of user is the one most likely to move torrents
-between category paths.
+feature reads inode link counts for files under `root_dir` mapped to `remote_dir`
+(`modules/util.py:1108-1240`, `CheckHardLinks` and `nohardlink`; mapping in
+`modules/util.py:1539-1578`) to detect them. When relocation is enabled, the same class of user is
+the one most likely to move torrents between category paths.
 
 The spec's guards (RF-3) cover cross-seed siblings and ambiguous paths; hardlinks are named in the
 plan's risks but no criterion requires a check. This decision fixes how far the feature goes.
@@ -100,6 +101,8 @@ small and its failure modes honest.
 ## References
 
 - `qbit-manage/spec.md` — RF-3, Included/Excluded scope; `qbit-manage/plan.md` — Risks.
-- `modules/core/tag_nohardlinks.py`, `modules/util.py:1539-1578` — existing hardlink detection and
-  the `root_dir`/`remote_dir` mapping.
+- `modules/util.py:1108-1240` — `CheckHardLinks`, `get_inode_count` and `nohardlink`, the existing
+  hardlink detection; `modules/util.py:1343` — `get_root_files`; `modules/util.py:1539-1578` —
+  `path_replace`, the `root_dir`/`remote_dir` mapping.
+- `modules/core/tag_nohardlinks.py` — the feature that consumes hardlink detection.
 - `docs/Config-Setup.md`, "nohardlinks" — the supported hardlink layout.

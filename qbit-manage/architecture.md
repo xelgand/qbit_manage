@@ -48,18 +48,29 @@ webhooks, the run statistics, the notification pipeline.
 
 ### Guard evaluation
 
-Evaluated in this order, cheapest first, only when the command's key is enabled:
+Evaluated in this order, cheapest and most authoritative first, only when the command's key is
+enabled:
 
 | # | Condition | Outcome |
 |---|---|---|
-| 1 | Category absent from `cat:`, or its value is a list (`Uncategorized`) or contains glob metacharacters (`*`, `?`, `[`) | No-op. Reason: no unambiguous configured path. |
-| 2 | Torrent not completed | No-op. Reason: incomplete. |
-| 3 | `torrent.auto_tmm` is true | No-op. Reason: Automatic Torrent Management governs the location (AC-13). |
+| 1 | **Effective Automatic Torrent Management** — `torrent.auto_tmm` is true, or, in the category-change path, `settings["force_auto_tmm"]` is on and the torrent carries no tag from `settings["force_auto_tmm_ignore_tags"]` | No-op. Reason: Automatic Torrent Management governs the location (AC-13, AC-14). |
+| 2 | Category absent from `cat:`, or its value is a list (`Uncategorized`) or contains glob metacharacters (`*`, `?`, `[`) | No-op. Reason: no unambiguous configured path. |
+| 3 | Torrent not completed | No-op. Reason: incomplete. |
 | 4 | Normalized save path equals the configured path | No-op. Reason: already in place (AC-6). |
 | 5 | A directory peer shares one of the torrent's file paths | **Refusal** (AC-4). |
 | 6 | Otherwise | Relocate. |
 
-Only step 5 refuses. Steps 1–4 cannot cause damage, so withholding the category change for them
+Rule 1 comes first because it is a local read and because AC-13 requires the Automatic Torrent
+Management reason whenever that setting is on, even for a torrent that is also incomplete or whose
+category has no literal path.
+
+Rule 1's input differs by path, and the difference is the point: `update_cat` itself enables
+Automatic Torrent Management for ATM-disabled torrents when `force_auto_tmm` is on
+(`modules/core/category.py:122-128`), so the category-change path evaluates the state the change
+produces; the alignment pass never touches Automatic Torrent Management and runs after every
+category write, so it evaluates `torrent.auto_tmm` as it stands.
+
+Only rule 5 refuses. Rules 1–4 cannot cause damage, so withholding the category change for them
 would be a regression, not a guard. The distinction matters because `set_category` is the one call
 in this path that can make qBittorrent move files itself, which is why a refusal must happen before
 it (ADR-002).
@@ -73,16 +84,20 @@ qBittorrent path space, and `root_dir`/`remote_dir` mapping must not be applied 
 
 ### Entry points
 
-1. **Category-change path** — inside `update_cat`, before `set_category`. A refusal returns
-   immediately (no category change, no relocation); a relocation is performed after
+1. **Category-change path** — inside `update_cat`. The plan is evaluated and logged before the
+   existing `if not self.config.dry_run:` block, so a dry run still reports every intended move and
+   every refusal (AC-8); only `set_category` and the relocation call are gated by it. A refusal
+   returns immediately (no category change, no relocation); a relocation is performed after
    `set_category` succeeds, so a failed category change never leaves a moved-but-miscategorized
-   torrent. Both run inside the existing `if not self.config.dry_run:` block.
+   torrent.
 2. **Alignment pass** — a new pass over already-categorized torrents, running only when
-   `cat_update_relocate` is enabled and only for completed, ATM-disabled torrents whose category
-   has a literal configured path. It changes no category, so a refusal withholds the relocation
-   alone. It runs after `category()` in `Category.__init__`, so torrents that just received a
-   category are evaluated against it; a torrent the first entry point already moved is a no-op by
-   rule 4.
+   `cat_update_relocate` is enabled and only for completed, non-ATM torrents whose category has a
+   literal configured path. It changes no category, so a refusal withholds the relocation alone. It
+   runs last in `Category.__init__` — after `category()` and after `change_categories()`
+   (`modules/core/category.py:23-25`) — so that: torrents that just received a category are
+   evaluated against it, a `cat_change` candidate is not first moved to its old category's path and
+   then to its new one, and any Automatic Torrent Management flip the run already made is visible
+   to rule 1. A torrent an earlier step already moved is a no-op by rule 4.
 
 ### Counters and statistics
 
@@ -113,21 +128,21 @@ block at `modules/config.py:394-449`. Mirrored in `config/config.yml.sample`,
 
 | Member | Contract |
 |---|---|
-| `category_config_path(category)` | The normalized literal configured path for a category, or `None` when rule 1 applies. Pure read of `config.data["cat"]`; decorated with `cache(...)` like `get_category` (`modules/qbittorrent.py:129-131`). |
-| `directory_peers(save_path, exclude_hash)` | Hashes of the other torrents sharing `save_path`, from a lazily fetched and cached full client list. Empty when the list cannot be read — callers then treat rule 5 as inconclusive and refuse. |
+| `category_config_path(category)` | The normalized literal configured path for a category, or `None` when rule 2 applies. Pure read of `config.data["cat"]`; decorated with `cache(...)` like `get_category` (`modules/qbittorrent.py:129-131`). |
+| `directory_peers(save_path, exclude_hash)` | The hashes of the torrents whose `save_path` is equal to, an ancestor of, or a descendant of `save_path` — every save path that can collide with it under `os.path.join` — from a lazily fetched and cached full client list. Returns `None` when that list cannot be read, which is a different answer from an empty list. |
 | `torrent_file_paths(torrent_hash)` | The set of `os.path.join(save_path, file.name)` for a torrent, cached for the run; `None` when the file list cannot be read. Built the same way as `add_torrent_files` (`modules/qbittorrent.py:239-253`) so the two agree on what a shared path is. |
-| `has_shared_files(torrent_hash, save_path)` | `True` when any peer shares a file path with the torrent, and `True` when that cannot be determined (fail closed). |
-| `relocate_torrent(torrent, target)` | `torrent.set_location(location=target)` under `@handle_qbit_api_errors(context="set_location", retry_attempts=2)`, the same decorator `set_category` uses through `category.py:118-150`. |
+| `has_shared_files(torrent_hash, save_path)` | `True` when a peer shares a file path with the torrent; `True` as well when the peers or any file list cannot be read, because the guard fails closed (ADR-003). `False` only on a complete, empty intersection. |
+| `relocate_torrent(torrent, target) -> bool` | Issues the move and reports whether it happened. The inner call returns `True` and is wrapped by `@handle_qbit_api_errors(context="set_location", retry_attempts=2)`; that decorator logs, notifies and returns `None` instead of raising for API errors (`modules/qbit_error_handler.py:155-243`), so the outer method returns `inner() is True` and a swallowed error reaches the caller as `False`. |
 
 ### `modules/core/category.py` (`Category`)
 
 | Member | Contract |
 |---|---|
 | `relocation_enabled(cat_change)` | `self.config.settings["cat_change_relocate" if cat_change else "cat_update_relocate"]`. |
-| `relocation_plan(torrent, category)` | Applies rules 1–5 and returns the outcome — relocate with a target, no-op with a reason, or refuse with a reason. Performs no API call except the cross-seed check of rule 5, and only after rules 1–4 passed. |
-| `relocate(torrent, target)` | Calls `Qbt.relocate_torrent`, logs and notifies the outcome; catches its own failure so one torrent cannot abort the run (AC-9). |
+| `relocation_plan(torrent, category, cat_change)` | Applies rules 1–5 and returns the outcome — relocate with a target, no-op with a reason, or refuse with a reason. Performs no API call except the cross-seed check of rule 5, and only after rules 1–4 passed. The `cat_change` argument selects rule 1's effective-Automatic-Torrent-Management predicate. |
+| `relocate(torrent, target)` | Calls `Qbt.relocate_torrent`, logs and notifies the outcome, and returns the boolean it received, so a swallowed API error is reported as a failure (AC-9) and is not counted as a relocation. |
 | `align_locations()` | The alignment pass. Uses `self.hashes` when the run was invoked with hashes, so a targeted run stays targeted. |
-| `update_cat(torrent, new_cat, cat_change)` | Gains the refusal short-circuit before `set_category` and the relocation after it. |
+| `update_cat(torrent, new_cat, cat_change)` | Gains the refusal short-circuit before the dry-run gate and the relocation after `set_category`. |
 
 Returning an outcome value rather than logging inside the guard keeps the decision testable without
 a notification pipeline, and keeps the wording of reasons in one place.
@@ -146,22 +161,25 @@ Nothing is persisted. All state is per-run and lives on the objects the run alre
 ## Sequences
 
 **Category change with relocation enabled.** `update_cat` → `relocation_plan` (rules 1–4 are local
-reads) → rule 5 asks `has_shared_files`, which fetches peer file lists on first use →
-plan says relocate → `set_category` → `relocate_torrent(target)` → log, notify, counters.
+reads) → rule 5 asks `has_shared_files`, which fetches peer file lists on first use → plan says
+relocate → `set_category` → `relocate_torrent(target)` → `True`: log, notify, count the
+relocation.
 
 **Refusal.** Same start; rule 5 reports a shared file → log and notify the refusal with its reason
 → return without calling `set_category` or `set_location`.
 
-**Alignment pass.** `Category.__init__` → `category()` → `align_locations()` → for each
-completed, ATM-disabled torrent with a category: plan → relocate or skip → summary line with
-counts. No category is written.
+**Alignment pass.** `Category.__init__` → `category()` → `change_categories()` →
+`align_locations()` → for each completed, non-ATM torrent with a category: plan → relocate or skip
+→ summary line with counts. No category is written.
 
-**Failure.** `relocate_torrent` raises after its retries → the failure is logged and notified with
-its context → the run continues with the next torrent (AC-9); the category change that preceded it
-stands, and the torrent simply remains where it was.
+**Failure.** `relocate_torrent` returns `False` after the decorator swallowed the API error and
+notified it (`modules/qbit_error_handler.py:210-243`) → `relocate` logs and notifies the failure
+with the torrent and target, does not count a relocation, and the run continues with the next
+torrent (AC-9); the category change that preceded it stands, and the torrent remains where it was.
 
-**Dry run.** `relocation_plan` still runs, so the log reports exactly what would move and what was
-refused; no `set_category`/`set_location` call is made.
+**Dry run.** The plan is evaluated and reported exactly as in a real run — what would move, what
+was refused — while `set_category` and `relocate_torrent` are never called, so no client state
+changes and no `set_location` is issued (AC-8).
 
 ## Operations
 
@@ -174,6 +192,12 @@ refused; no `set_category`/`set_location` call is made.
   `group_notifications_by_key` indexes `attr["torrent_category"]` when a run exceeds the grouping
   limit (`modules/webhooks.py:195-249`); an attribute missing it would raise inside the
   notification path, not in the relocation path.
+- Relocated and refused torrents are appended to `self.torrents_updated` alongside category
+  updates, because that list is what decides grouping (`modules/webhooks.py:196`): a relocation-only
+  run of a large library would otherwise emit one notification per torrent. `self.torrents_updated`
+  feeds only that decision in this class (`modules/core/category.py:25`), so the list's meaning
+  broadens from "torrents whose category changed" to "torrents this command acted on" while
+  `self.stats` — and therefore the run-end `torrents_categorized` count — keeps the narrow meaning.
 - No new webhook field, no new stats key: the run-end payload keeps its current shape.
 
 ## Verification
@@ -186,9 +210,11 @@ refused; no `set_category`/`set_location` call is made.
 | Manual | The four configuration surfaces agree, and a real run reports what it intended | `make lint`, `make format`, `make pre-commit`, plus a dry run against a real client |
 
 The design's risky edges are exactly the ones the acceptance tests must pin: that a refusal
-withholds `set_category` (AC-4), that a no-op does not (AC-5, AC-6, AC-7, AC-13), that the
-alignment pass writes no category (AC-12), and that disabling both keys leaves the run's calls
-unchanged (AC-3).
+withholds `set_category` (AC-4), that a no-op does not (AC-5, AC-6, AC-7, AC-13), that
+`force_auto_tmm` suspends relocation even though the torrent was ATM-disabled when the plan was
+evaluated (AC-14), that the alignment pass writes no category (AC-12), that a swallowed API error
+is reported as a failed relocation rather than a success (AC-9), and that disabling both keys
+leaves the run's calls unchanged (AC-3).
 
 ## Open questions
 

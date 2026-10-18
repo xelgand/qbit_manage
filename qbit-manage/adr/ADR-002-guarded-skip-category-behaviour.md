@@ -71,8 +71,14 @@ where a refusal reaching the client is impossible.
 
 The decision is scoped to the category-change path. The alignment pass introduced by RF-6 changes
 no category: there, a refusal withholds the relocation alone, because there is nothing else to
-withhold. Ambiguous configured paths and torrents already in place are not refusals either — they
-mean no relocation applies, so the category change proceeds as it does today.
+withhold. Ambiguous configured paths, incomplete torrents and torrents already in place are not
+refusals either — they mean no relocation applies, so the category change proceeds as it does
+today. Automatic Torrent Management is the one guard that can be classified either way by reading
+the list above, so it is stated explicitly: a torrent whose location the client governs, including
+one this run's `force_auto_tmm` is about to govern, is a configuration-level no-op — the category
+change is applied and the relocation is withheld and reported (AC-13, AC-14). Withholding the
+category change there would break the setting's purpose; moving the data there would contend with
+the client.
 
 ## Consequences
 

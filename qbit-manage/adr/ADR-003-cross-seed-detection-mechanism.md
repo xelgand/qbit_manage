@@ -24,9 +24,12 @@ only when at least one command in `TORRENT_DICT_COMMANDS` is enabled (`qbittorre
 `share_limits`. Building it costs one file-list fetch per torrent in the client
 (`get_torrent_info`, `qbittorrent.py:133-237`).
 
-`cat_update` and `cat_change` are not in that list, so during a category-only run `torrentfiles` is
-`None`. The relocation guard from RF-3 must decide whether another torrent owns the same files
-before calling `set_location`, which moves them on disk.
+`cat_update` and `cat_change` are not in that list, so during a category-only run the map stays
+empty — it is initialized to `{}` and never filled (`qbittorrent.py:99`, `:122-127`). The existing
+guards cannot run on it either: `has_cross_seed` and `is_cross_seed` index
+`self.torrentfiles[full_path]` per file (`qbittorrent.py:263`, `:283`), which raises `KeyError` on
+an empty map. The relocation guard from RF-3 must decide whether another torrent owns the same
+files before calling `set_location`, which moves them on disk.
 
 ## Question
 
@@ -61,14 +64,20 @@ shares the directory.
 ### Option C: Lazy per-candidate detection
 
 When relocation is enabled and a torrent is a candidate, fetch file lists for that torrent and for
-the torrents sharing its `save_path`, and intersect the file paths to decide sibling status.
+the torrents whose `save_path` could collide with it — the ones equal to, above, or below it in the
+directory tree, because `os.path.join(save_path, file.name)` can only produce the same path for two
+torrents when one save path is the other or an ancestor of it (for example `/data/tv` +
+`Show/e01.mkv` and `/data/tv/Show` + `e01.mkv`) — then intersect the file paths to decide sibling
+status.
 
 - Gives: accurate results with a bounded cost — API calls proportional to the number of relocation
   candidates and their neighbours, zero when relocation is off or nothing needs to move, so RNF-1
-  holds. It reuses the same path-intersection idea as `add_torrent_files`.
+  holds. The peer selection is computed from save paths alone, which the run already has, and the
+  intersection reuses the path construction of `add_torrent_files`, so the guard's notion of a
+  shared file is the same one `share_limits` and `rem_unregistered` act on.
 - Costs: new detection code to write and test, and a per-candidate cost that grows with the size of
-  the shared directory; requires caching within a run so that two candidates in one directory do
-  not fetch the same peer's file list twice.
+  the surrounding directory tree; requires caching within a run so that two candidates in one
+  directory do not fetch the same peer's file list twice.
 
 ## Decision
 
@@ -86,16 +95,18 @@ construction, same intersection), and needs no change to `TORRENT_DICT_COMMANDS`
 
 ## Consequences
 
-- Detection cost is proportional to relocation candidates and their directory peers, not to the
-  library; a run with relocation enabled and nothing to move costs no extra API calls.
-- A per-run cache is required, or two candidates in one directory refetch the same peers' file
-  lists.
-- The guard's notion of a sibling matches `share_limits` and `rem_unregistered`, so the three
-  features cannot disagree about what a cross-seed is.
+- Detection cost is proportional to relocation candidates and their directory-tree neighbours, not
+  to the library; a run with relocation enabled and nothing to move costs no extra API calls.
+- A per-run cache is required, or two candidates in one tree refetch the same peers' file lists.
+- The guard's notion of a sibling matches `share_limits` and `rem_unregistered`: same path
+  construction, same intersection, and a peer set that covers every save-path pair able to produce
+  a colliding file path.
 - The guard remains blind to files that are *not* shared by path — hardlinked duplicates of the
   same content under different paths — which is ADR-004's decision.
-- If a peer's file list cannot be fetched, the guard must fail closed for that candidate: an
-  unknown sibling is treated as a sibling, so a guard that cannot run refuses the move.
+- If a candidate's own file list, or a peer's, cannot be fetched, the guard must fail closed for
+  that candidate: an unknown sibling is treated as a sibling, so a guard that cannot run refuses
+  the move. The peer lookup therefore distinguishes "no peers" from "could not read the torrent
+  list" rather than returning an empty list for both.
 
 ## References
 
