@@ -3,7 +3,7 @@ type: spec
 revision: 1
 project: qbit-manage
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
 # Spec: qBit Manage — relocate torrents to the category's configured path
@@ -35,25 +35,36 @@ Without the opt-in, behavior is byte-for-byte identical to today.
   path after the category switch.
 - RF-3: Relocation is guarded: it never moves a torrent whose files are shared with cross-seed
   siblings, never resolves an ambiguous configured path (wildcard entries, `Uncategorized`
-  multi-path lists), does nothing when the torrent already sits at the configured path, and only
-  applies to completed torrents.
+  multi-path lists), does nothing when the torrent already sits at the configured path, applies
+  only to completed torrents, and never targets a torrent whose location qBittorrent itself
+  manages through Automatic Torrent Management.
 - RF-4: Relocation honors `dry_run` (logs the intended move, performs none) and a relocation
   failure on one torrent is logged and notified without aborting the rest of the run.
 - RF-5: The new configuration keys are registered through the existing `check_for_attribute`
   pattern and propagate to every configuration surface: `config/config.yml.sample`,
   `docs/Config-Setup.md` and the matching `web-ui/js/config-schemas/` schema.
+- RF-6: With relocation enabled, `cat_update` also aligns torrents that already carry a category
+  but sit outside that category's configured path, moving them to it without changing their
+  category. This covers the larger part of a typical library, which today is skipped by the
+  existing "has a category, Automatic Torrent Management disabled" filter.
 
 ## Non-functional requirements
 
 - RNF-1: Backwards compatibility: with the new keys absent or disabled, no relocation call is
   ever made and existing category behavior is unchanged.
-- RNF-2: Observability: every relocation and every guarded skip produces a log line with the
-  reason, consistent with the existing category logging and notification attributes.
+- RNF-2: Observability: every relocation, every refusal and every configuration-level skip
+  (ambiguous path, category absent from `cat:`) produces a log line naming the torrent and the
+  reason, and reaches the run's notification payload; per-torrent no-ops that are normal
+  (already in place, Automatic Torrent Management, incomplete) are logged and counted in the run
+  summary instead of notified one by one, so a large library cannot produce a notification storm.
 
 ## Included scope
 
 - Opt-in relocation for the `cat_update` and `cat_change` commands, sharing one relocation
   implementation.
+- Alignment of already-categorized torrents with their category's configured path, when
+  `cat_update` relocation is enabled and Automatic Torrent Management is disabled for the torrent
+  (RF-6).
 - Configuration parsing and validation for the new keys, on all four configuration surfaces.
 - Unit tests for the relocation logic, its guards and the configuration parsing.
 - Documentation of the behavior, its guards and its interaction with Automatic Torrent
@@ -68,22 +79,28 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 - Cross-drive or cross-filesystem move orchestration beyond what qBittorrent's `set_location`
   performs (the standalone `scripts/mover.py` use case).
 - Relocation triggered by any command other than `cat_update` and `cat_change`.
+- Relocation of torrents whose location qBittorrent manages through Automatic Torrent Management:
+  for those, the client's per-category save path governs, and the mismatch between that path and
+  the `cat:` configuration is the excluded synchronization above.
 - A new CLI command: the feature extends the two existing commands through configuration only.
 
 ## Acceptance criteria
 
-- AC-1 (`RF-1`): Given relocation is enabled and a torrent is assigned a category whose
-  configured `cat:` path differs from its save path, when `cat_update` applies the category,
-  then the torrent's location is set to the configured path.
-- AC-2 (`RF-2`): Given relocation is enabled and `cat_change` switches a completed torrent to a
-  category with a different configured path, when the switch is applied, then the torrent's
-  location is set to the new category's configured path.
+- AC-1 (`RF-1`): Given relocation is enabled, Automatic Torrent Management is disabled for the
+  torrent, and the torrent is assigned a category whose configured `cat:` path differs from its
+  save path, when `cat_update` applies the category, then the torrent's location is set to the
+  configured path.
+- AC-2 (`RF-2`): Given relocation is enabled and Automatic Torrent Management is disabled,
+  when `cat_change` switches a completed torrent to a category with a different configured path,
+  then the torrent's location is set to the new category's configured path.
 - AC-3 (`RF-1`, `RF-2`, `RNF-1`): Given the relocation keys are absent or disabled, when
   `cat_update` or `cat_change` run, then no location change is requested for any torrent and the
   logged behavior matches the pre-feature behavior.
 - AC-4 (`RF-3`): Given a torrent whose files are shared with a cross-seed sibling, when
-  relocation would apply, then the relocation is skipped and the skip is logged with the
-  cross-seed reason.
+  relocation would apply in the category-change path, then neither the category change nor the
+  relocation is requested for it, and the skip is logged and notified with the cross-seed reason.
+  In the alignment path (RF-6) there is no category change to withhold, so the guard withholds the
+  relocation alone.
 - AC-5 (`RF-3`): Given a category whose configured path is ambiguous (wildcard pattern or an
   `Uncategorized` list of paths), when relocation would target it, then the relocation is
   skipped and the ambiguity is logged.
@@ -98,8 +115,18 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 - AC-10 (`RF-5`): Given an invalid value for a new relocation key, when the configuration is
   loaded, then it is rejected with the same error behavior as other invalid configuration keys;
   and the keys are documented in the sample config, the setup docs and the web UI schema.
-- AC-11 (`RNF-2`): Given relocation is enabled, when a run relocates or skips torrents, then the
-  run's log and notification payload identify each relocated or skipped torrent with its reason.
+- AC-11 (`RNF-2`): Given relocation is enabled, when a run relocates torrents, refuses a
+  relocation or skips one for a configuration-level reason, then the log and the notification
+  payload identify each such torrent with its reason, while normal no-ops (already in place,
+  Automatic Torrent Management, incomplete) appear in the log and in per-run summary counts
+  without a notification of their own.
+- AC-12 (`RF-6`): Given relocation is enabled for `cat_update`, Automatic Torrent Management is
+  disabled, and a completed torrent carries a category whose configured path differs from its
+  save path, when `cat_update` runs, then the torrent's location is set to that configured path
+  and its category is left unchanged.
+- AC-13 (`RF-3`): Given Automatic Torrent Management is enabled for a torrent, when relocation is
+  evaluated, then no location change is requested for it and the skip is logged with the
+  Automatic Torrent Management reason.
 
 ## Constraints
 
@@ -108,13 +135,13 @@ Without the opt-in, behavior is byte-for-byte identical to today.
   `root_dir`/`remote_dir` mapping and must not leak into relocation targets.
 - The relocation guard for cross-seeds must work during `cat_update` runs, where the full
   torrent file map (`torrentfiles`) is not built today.
+- Automatic Torrent Management is a client-side location authority: relocation never contends
+  with it, so torrents under it are out of scope (AC-13) and no sequence of category change and
+  location change may race the client's own move.
 - Python 3.10+, Ruff lint/format, and the repository's test-factory patterns apply (AGENTS.md).
 - All changes land through pull requests targeting `develop` (AGENTS.md branch model).
 
 ## Open questions
 
-- On a guarded skip (for example a cross-seed sibling), should the category change itself still
-  be applied, or should the torrent be left entirely untouched? To be resolved by an ADR.
-- Should the opt-in be a single global setting, a per-`cat_change`-mapping flag, or both? To be
-  resolved by an ADR; the spec only requires that both commands can be enabled independently.
-- None of these blocks this proposal.
+- None blocks this proposal. The two questions that were open here — what a guarded skip does to
+  the category change, and where the opt-in lives — are resolved by ADR-002 and ADR-001.
