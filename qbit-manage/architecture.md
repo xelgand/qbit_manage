@@ -188,13 +188,12 @@ changes and no `set_location` is issued (AC-8).
   refusal and skip; the per-run summary line reporting counts per reason closes the run and carries
   the same numbers as the summary notification.
 - Notifications reuse the existing pipeline: attributes appended to `self.notify_attr` with
-  `function: "cat_update"` and a title that distinguishes a relocation, a refusal and the skip
-  summary. Each attribute carries `torrent_category`, `torrent_tag`, `torrent_tracker` and
-  `notifiarr_indexer` because `group_notifications_by_key` indexes `attr["torrent_category"]` when
-  a run exceeds the grouping limit (`modules/webhooks.py:195-249`); an attribute missing it would
-  raise inside the notification path, not in the relocation path. The summary attribute carries the
-  category-independent value `None` for the tag, tracker and indexer fields, as the grouping path
-  already does for grouped entries (`modules/webhooks.py:229-232`).
+  `function: "cat_update"` and a title that distinguishes a relocation from a refusal — those two
+  are the only classes that go through grouping. Each attribute carries `torrent_category`,
+  `torrent_tag`, `torrent_tracker` and `notifiarr_indexer` because `group_notifications_by_key`
+  indexes `attr["torrent_category"]` when a run exceeds the grouping limit
+  (`modules/webhooks.py:195-249`); an attribute missing it would raise inside the notification path,
+  not in the relocation path.
 - Relocated and refused torrents are appended to `self.torrents_updated` alongside category
   updates, because that list is what decides grouping (`modules/webhooks.py:196`) — the run-end
   payload for a relocation-heavy alignment run would otherwise be one notification per torrent.
@@ -202,12 +201,22 @@ changes and no `set_location` is issued (AC-8).
   so the list's meaning broadens from "torrents whose category changed" to "torrents this command
   acted on" while `self.stats` — and therefore the run-end `torrents_categorized` count — keeps the
   narrow meaning.
-- Every other skip is never notified per torrent. The pass keeps counters per reason (ambiguous or
-  absent configured path, incomplete, Automatic Torrent Management, already in place) and appends a
-  single attribute at the end of the run with `function: "cat_update"`, a title that marks it a
-  summary, and a body listing the counts. That is what keeps a run whose every candidate was
-  skipped visible in notifications without a storm (RNF-2, AC-11), and it is the only notification
-  a torrent's own Automatic Torrent Management setting can produce (AC-13, AC-14).
+- Every other skip is never notified per torrent and never travels through the grouping path. The
+  pass keeps counters per reason (ambiguous or absent configured path, incomplete, Automatic
+  Torrent Management, already in place) and, at the end of the run, sends one attribute directly
+  with `self.config.send_notifications(attr)` — the precedent is the grouped cleanup summary in
+  `modules/core/share_limits.py:176-201` — instead of appending it to `self.notify_attr`. That
+  matters because `Webhooks.notify` groups into per-`torrent_category` buckets as soon as
+  `len(torrents_updated) > 10` (`modules/webhooks.py:12`, `:196`), keeps one attribute per bucket as
+  the leader, rewrites its body unless the bucket holds exactly one torrent (`:218-225`) and indexes
+  `torrents` unguarded (`:212`, `:226`): a category-independent summary inside that path would
+  either lose its counts to the rewrite or raise `KeyError`. The sent attribute is fully pinned —
+  `function: "cat_update"`, a title marking it a summary, a body listing the counts per reason,
+  `torrents` holding the skipped torrent names, and `torrent_category`, `torrent_tag`,
+  `torrent_tracker` and `notifiarr_indexer` all `None`, matching the cleanup summary's shape. It is
+  what keeps a run whose every candidate was skipped visible in notifications without a storm
+  (RNF-2, AC-11), and it is the only notification a torrent's own Automatic Torrent Management
+  setting can produce (AC-13, AC-14).
 - No new webhook field, no new stats key: the run-end payload keeps its current shape.
 
 ## Verification
