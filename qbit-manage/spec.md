@@ -54,12 +54,13 @@ Without the opt-in, behavior is byte-for-byte identical to today.
 
 - RNF-1: Backwards compatibility: with the new keys absent or disabled, no relocation call is
   ever made and existing category behavior is unchanged.
-- RNF-2: Observability: every relocation, every refusal and every configuration-level skip
-  (ambiguous path, category absent from `cat:`, Automatic Torrent Management, whether the
-  torrent's own or the one `force_auto_tmm` applies) produces a log line naming the torrent and
-  the reason, and reaches the run's notification payload; per-torrent no-ops that are normal
-  (already in place, incomplete) are logged and counted in the run summary instead of notified one
-  by one, so a large library cannot produce a notification storm.
+- RNF-2: Observability: every relocation, every refusal and every skip produces a log line naming
+  the torrent and the reason. Relocations and refusals also reach the notification payload per
+  torrent; every other skip — an ambiguous or absent configured path, an incomplete torrent, an
+  Automatic Torrent Management torrent, whether the setting is the torrent's own or the one
+  `force_auto_tmm` applies, and a torrent already in place — is reported in one per-run summary
+  entry with counts per reason. No library size can therefore produce a notification storm, and a
+  run where every candidate was skipped still says so.
 
 ## Included scope
 
@@ -119,22 +120,22 @@ Without the opt-in, behavior is byte-for-byte identical to today.
   loaded, then it is rejected with the same error behavior as other invalid configuration keys;
   and the keys are documented in the sample config, the setup docs and the web UI schema.
 - AC-11 (`RNF-2`): Given relocation is enabled, when a run relocates torrents, refuses a
-  relocation or skips one for a configuration-level reason, then the log and the notification
-  payload identify each such torrent with its reason, while normal no-ops (already in place,
-  Automatic Torrent Management, incomplete) appear in the log and in per-run summary counts
-  without a notification of their own.
+  relocation or skips one for any reason, then the log identifies each affected torrent with its
+  reason, the notification payload identifies each relocated and refused torrent individually, and
+  every other skip appears in a single per-run summary entry carrying the count per reason.
 - AC-12 (`RF-6`): Given relocation is enabled for `cat_update`, Automatic Torrent Management is
   disabled, and a completed torrent carries a category whose configured path differs from its
   save path, when `cat_update` runs, then the torrent's location is set to that configured path
   and its category is left unchanged.
 - AC-13 (`RF-3`): Given Automatic Torrent Management is enabled for a torrent, when relocation is
-  evaluated, then no location change is requested for it and the skip is logged with the
-  Automatic Torrent Management reason.
+  evaluated, then no location change is requested for it, the skip is logged with the Automatic
+  Torrent Management reason, and it is counted in the per-run skip summary.
 - AC-14 (`RF-3`): Given `force_auto_tmm` is enabled and the torrent carries no ignore tag from
   `force_auto_tmm_ignore_tags`, when the category-change path evaluates relocation, then no
   location change is requested for that torrent — the category change hands its location to
-  qBittorrent — and the skip is logged and notified with that reason. In the alignment path, which
-  never enables Automatic Torrent Management itself, the torrent's own current setting governs.
+  qBittorrent — the skip is logged with that reason and counted in the per-run skip summary. In the
+  alignment path, which never enables Automatic Torrent Management itself, the torrent's own
+  current setting governs.
 
 ## Constraints
 
