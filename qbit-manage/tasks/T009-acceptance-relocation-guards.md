@@ -70,3 +70,9 @@ including the distinction between a refusal and a no-op.
   `set_category`, or an ATM skip asserted with the incomplete reason.
 
 Covered by `TST009`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/13
+- Commit: `f29376f` (test(T009): cover every relocation guard and its reason)
+- Merge: `92edb17cc0b94fd6f4dae14bd1e997ab20f61364` into `specbound/E001-relocate-torrents-to-category-path`
