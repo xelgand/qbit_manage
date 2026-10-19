@@ -43,6 +43,13 @@ class RecordingLogger:
         return None
 
 
+class StaleCategoryTorrent(FakeTorrent):
+    """Mimic qbittorrentapi: ``set_category`` sends the request but keeps the old category."""
+
+    def set_category(self, category):
+        self._record("set_category", category=category)
+
+
 @pytest.fixture
 def category_module(monkeypatch):
     """Patch the category module logger for the duration of one test only."""
@@ -53,8 +60,8 @@ def category_module(monkeypatch):
     return module, recorder
 
 
-def _build(*, settings=None, dry_run=False, category_paths=None, has_shared_files=False, **torrent_kwargs):
-    torrent = FakeTorrent(
+def _build(*, settings=None, dry_run=False, category_paths=None, has_shared_files=False, torrent=None, **torrent_kwargs):
+    torrent = torrent or FakeTorrent(
         name="Example.Torrent",
         category="Downloads",
         save_path="/data/downloads/Example.Torrent",
@@ -231,6 +238,67 @@ def test_update_cat_cat_change_path_lets_force_auto_tmm_skip_the_move(category_m
     assert qbt.has_shared_files_calls == []
     assert cat._relocation_counters()["skipped"] == {RELOCATION_SKIP_AUTO_TMM: 1}
     assert len(recorder.messages) == 4 + 1  # one skip line, then the unchanged category block
+
+
+def test_update_cat_cat_update_path_lets_force_auto_tmm_skip_the_move(category_module):
+    from modules.core.category import RELOCATION_SKIP_AUTO_TMM
+
+    _, recorder = category_module
+    cat, qbt, _, torrent = _build(
+        settings={"cat_update_relocate": True, "force_auto_tmm": True},
+        category_paths={"Movies": "/data/media/Movies"},
+    )
+    _wire_client_move(qbt)
+
+    # cat_update is a category change too: its set_category enables ATM for this torrent.
+    cat.update_cat(torrent, "Movies", False)
+
+    assert _call_names(torrent) == ["set_category", "set_auto_management"]
+    assert qbt.relocate_torrent_calls == []
+    assert qbt.has_shared_files_calls == []
+    assert cat._relocation_counters()["skipped"] == {RELOCATION_SKIP_AUTO_TMM: 1}
+    assert f"Skipping relocation for {torrent.name}: {RELOCATION_SKIP_AUTO_TMM}." in recorder.messages
+
+
+def test_update_cat_cat_update_path_relocates_when_an_ignore_tag_protects_the_torrent(category_module):
+    _, recorder = category_module
+    cat, qbt, _, torrent = _build(
+        settings={"cat_update_relocate": True, "force_auto_tmm": True, "force_auto_tmm_ignore_tags": ["Keep"]},
+        category_paths={"Movies": "/data/media/Movies"},
+        tags="Keep",
+    )
+    _wire_client_move(qbt)
+
+    cat.update_cat(torrent, "Movies", False)
+
+    assert _call_names(torrent) == ["set_category", "set_location"]
+    assert qbt.relocate_torrent_calls == [(torrent, TARGET)]
+    assert cat._relocation_counters()["skipped"] == {}
+    assert any(f"Relocated {torrent.name} to {TARGET}" in message for message in recorder.messages)
+
+
+def test_update_cat_relocation_reports_the_post_change_category(category_module):
+    _, _ = category_module
+    cat, qbt, _, torrent = _build(
+        settings={"cat_update_relocate": True},
+        category_paths={"Movies": "/data/media/Movies"},
+        torrent=StaleCategoryTorrent(
+            name="Stale.Torrent",
+            category="Downloads",
+            save_path="/data/downloads/Stale.Torrent",
+        ),
+    )
+    _wire_client_move(qbt)
+
+    cat.update_cat(torrent, "Movies", False)
+
+    # The client never mutates the local object, so the category on the torrent stays stale.
+    assert torrent.category == "Downloads"
+    assert _call_names(torrent) == ["set_category", "set_location"]
+    relocation_attr = cat.notify_attr[0]
+    assert relocation_attr["title"] == "Relocating Torrents"
+    assert relocation_attr["torrent_category"] == "Movies"
+    assert cat.notify_attr[1]["torrent_category"] == "Movies"
 
 
 # ── dry run ──────────────────────────────────────────────────────────────────

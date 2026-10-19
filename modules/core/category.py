@@ -150,18 +150,26 @@ class Category:
         """Report whether relocation is enabled for the selected command path."""
         return self.config.settings["cat_change_relocate" if cat_change else "cat_update_relocate"]
 
-    def _effective_auto_tmm(self, torrent, cat_change):
-        """Report whether qBittorrent governs the torrent's location for this path."""
+    def _effective_auto_tmm(self, torrent, category_change):
+        """Report whether qBittorrent governs the torrent's location for this plan.
+
+        ``category_change`` is not the command flag: it says whether the evaluation accompanies a
+        category change that may hand the location to Automatic Torrent Management.
+        """
         if torrent.auto_tmm:
             return True
-        if not cat_change or not self.config.settings["force_auto_tmm"]:
+        if not category_change or not self.config.settings["force_auto_tmm"]:
             return False
         ignore_tags = self.config.settings.get("force_auto_tmm_ignore_tags", [])
         return not any(tag in (torrent.tags or "") for tag in ignore_tags)
 
-    def relocation_plan(self, torrent, category, cat_change):
-        """Evaluate the relocation guards for one torrent without changing anything."""
-        if self._effective_auto_tmm(torrent, cat_change):
+    def relocation_plan(self, torrent, category, category_change):
+        """Evaluate the relocation guards for one torrent without changing anything.
+
+        ``category_change`` marks an evaluation that accompanies a category change and the
+        Automatic Torrent Management it may enable; the alignment pass passes ``False``.
+        """
+        if self._effective_auto_tmm(torrent, category_change):
             return _skip(RELOCATION_SKIP_AUTO_TMM)
         target = self.qbt.category_config_path(category)
         if target is None:
@@ -188,7 +196,7 @@ class Category:
         for torrent in torrent_list:
             if not torrent.category or torrent.category == self.uncategorized_mapping:
                 continue
-            plan = self.relocation_plan(torrent, torrent.category, cat_change=False)
+            plan = self.relocation_plan(torrent, torrent.category, category_change=False)
             if plan.action == RELOCATION_ACTION_REFUSE:
                 self.report_refusal(torrent, plan.reason)
             elif plan.action == RELOCATION_ACTION_SKIP:
@@ -219,7 +227,9 @@ class Category:
         old_cat = torrent.category
         plan = None
         if self.relocation_enabled(cat_change):
-            plan = self.relocation_plan(torrent, new_cat, cat_change)
+            # Both commands reach this method, and the change it performs may enable Automatic
+            # Torrent Management for an ATM-off torrent, so the plan always sees a category change.
+            plan = self.relocation_plan(torrent, new_cat, category_change=True)
             if plan.action == RELOCATION_ACTION_REFUSE:
                 self.report_refusal(torrent, plan.reason)
                 return
@@ -265,7 +275,7 @@ class Category:
 
             category_updated = set_category_with_creation()
             if category_updated and plan is not None and plan.action == RELOCATION_ACTION_RELOCATE:
-                self.relocate(torrent, plan.target)
+                self.relocate(torrent, plan.target, category=new_cat)
         body = []
         body += logger.print_line(logger.insert_space(f"Torrent Name: {t_name}", 3), self.config.loglevel)
         if cat_change:
