@@ -1,4 +1,6 @@
+import os
 import time
+from dataclasses import dataclass
 
 from qbittorrentapi import Conflict409Error
 
@@ -6,6 +8,37 @@ from modules import util
 from modules.qbit_error_handler import handle_qbit_api_errors
 
 logger = util.logger
+
+RELOCATION_ACTION_RELOCATE = "relocate"
+RELOCATION_ACTION_SKIP = "skip"
+RELOCATION_ACTION_REFUSE = "refuse"
+
+RELOCATION_SKIP_AUTO_TMM = "Automatic Torrent Management"
+RELOCATION_SKIP_NO_CONFIGURED_PATH = "no unambiguous configured path"
+RELOCATION_SKIP_INCOMPLETE = "incomplete"
+RELOCATION_SKIP_ALREADY_IN_PLACE = "already in place"
+RELOCATION_REFUSE_CROSS_SEED = "cross-seed"
+
+
+@dataclass(frozen=True)
+class RelocationPlan:
+    """Outcome of evaluating the relocation guards for one torrent."""
+
+    action: str
+    reason: str | None = None
+    target: str | None = None
+
+    @property
+    def relocates(self) -> bool:
+        return self.action == RELOCATION_ACTION_RELOCATE
+
+
+def _skip(reason: str) -> RelocationPlan:
+    return RelocationPlan(action=RELOCATION_ACTION_SKIP, reason=reason)
+
+
+def _refuse(reason: str) -> RelocationPlan:
+    return RelocationPlan(action=RELOCATION_ACTION_REFUSE, reason=reason)
 
 
 class Category:
@@ -108,6 +141,34 @@ class Category:
     def get_tracker_cat(self, torrent):
         tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
         return [tracker["cat"]] if tracker["cat"] else None
+
+    def relocation_enabled(self, cat_change):
+        """Report whether relocation is enabled for the selected command path."""
+        return self.config.settings["cat_change_relocate" if cat_change else "cat_update_relocate"]
+
+    def _effective_auto_tmm(self, torrent, cat_change):
+        """Report whether qBittorrent governs the torrent's location for this path."""
+        if torrent.auto_tmm:
+            return True
+        if not cat_change or not self.config.settings["force_auto_tmm"]:
+            return False
+        ignore_tags = self.config.settings.get("force_auto_tmm_ignore_tags", [])
+        return not any(tag in (torrent.tags or "") for tag in ignore_tags)
+
+    def relocation_plan(self, torrent, category, cat_change):
+        """Evaluate the relocation guards for one torrent without changing anything."""
+        if self._effective_auto_tmm(torrent, cat_change):
+            return _skip(RELOCATION_SKIP_AUTO_TMM)
+        target = self.qbt.category_config_path(category)
+        if target is None:
+            return _skip(RELOCATION_SKIP_NO_CONFIGURED_PATH)
+        if not torrent.state_enum.is_complete:
+            return _skip(RELOCATION_SKIP_INCOMPLETE)
+        if os.path.join(torrent.save_path, "") == os.path.join(target, ""):
+            return _skip(RELOCATION_SKIP_ALREADY_IN_PLACE)
+        if self.qbt.has_shared_files(torrent.hash, torrent.save_path):
+            return _refuse(RELOCATION_REFUSE_CROSS_SEED)
+        return RelocationPlan(action=RELOCATION_ACTION_RELOCATE, target=target)
 
     def update_cat(self, torrent, new_cat, cat_change):
         """Update category based on the torrent information"""
