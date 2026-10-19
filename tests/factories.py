@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import field
@@ -244,6 +245,9 @@ class FakeTorrent:
         self._record("set_auto_management", enable=enable)
         self.auto_tmm = enable
 
+    def set_location(self, location):
+        self._record("set_location", location=location)
+
     def add_trackers(self, urls):
         self._record("add_trackers", urls=urls)
 
@@ -278,6 +282,8 @@ class FakeConfig:
             "share_limits_filter_completed": True,
             "cat_filter_completed": True,
             "cat_update_all": False,
+            "cat_update_relocate": False,
+            "cat_change_relocate": False,
             "force_auto_tmm": False,
             "force_auto_tmm_ignore_tags": [],
             "tag_nohardlinks_filter_completed": True,
@@ -357,10 +363,15 @@ class FakeQbtManager:
         global_max_seeding_time_enabled=False,
         torrentissue=None,
         torrentvalid=None,
+        category_paths=None,
+        has_shared_files=False,
     ):
         self.config = config or FakeConfig()
         self.client = client or FakeClient()
         self._torrents = list(torrents or [])
+        self.category_paths = dict(category_paths or {})
+        self.shared_files = has_shared_files
+        self.has_shared_files_calls = []
         self.torrentinfo = torrentinfo or {}
         self.global_max_ratio = global_max_ratio
         self.global_max_ratio_enabled = global_max_ratio_enabled
@@ -418,6 +429,18 @@ class FakeQbtManager:
     def get_category(self, path):
         """Return 'Uncategorized' for all save paths (overridable via subclassing or monkeypatching)."""
         return "Uncategorized"
+
+    def category_config_path(self, category):
+        """Return the normalized literal configured path, or None when it is not usable."""
+        save_path = self.category_paths.get(category)
+        if not isinstance(save_path, str) or any(character in save_path for character in "*?["):
+            return None
+        return os.path.join(save_path, "")
+
+    def has_shared_files(self, torrent_hash, save_path):
+        """Report the configured cross-seed answer and record the check."""
+        self.has_shared_files_calls.append((torrent_hash, save_path))
+        return self.shared_files
 
     @property
     def torrent_list(self):
