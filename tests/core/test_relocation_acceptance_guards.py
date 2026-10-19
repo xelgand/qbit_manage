@@ -321,3 +321,60 @@ def test_ac_14_force_auto_tmm_with_ignore_tag_is_relocated(category_module):
     assert cat._relocation_counters()["skipped"] == {}
     assert _skip_lines(recorder) == []
     assert f"Relocated {torrent.name} to {TARGET}." in recorder.messages
+
+
+def test_ac_14_cat_update_path_force_auto_tmm_without_ignore_tag_is_not_relocated(category_module):
+    """AC-14 on the cat_update command: the category assignment hands the location over, no move."""
+    _, recorder = category_module
+    cat, qbt, cfg, torrent = _build(
+        settings={"cat_update_relocate": True, "force_auto_tmm": True},
+    )
+    _wire_client_move(qbt)
+
+    cat.update_cat(torrent, CATEGORY, False)
+
+    # The same change records the category and enables ATM; the relocation must not follow.
+    assert _call_names(torrent) == ["set_category", "set_auto_management"]
+    assert torrent.calls[0][1] == {"category": CATEGORY}
+    assert torrent.calls[1][1] == {"enable": True}
+    assert torrent.auto_tmm is True
+    assert "set_location" not in _call_names(torrent)
+    assert qbt.relocate_torrent_calls == []
+    assert qbt.has_shared_files_calls == []
+    assert _skip_lines(recorder) == [f"Skipping relocation for {torrent.name}: {RELOCATION_SKIP_AUTO_TMM}."]
+    assert cat._relocation_counters()["skipped"] == {RELOCATION_SKIP_AUTO_TMM: 1}
+    assert cat.stats == 1
+    assert [attr["title"] for attr in cat.notify_attr] == ["Updating Categories"]
+
+    cat.relocation_skip_summary()
+
+    assert len(cfg.notifications_sent) == 1
+    summary = cfg.notifications_sent[0]
+    assert summary["title"] == "Relocation Skipped"
+    assert f"{RELOCATION_SKIP_AUTO_TMM}: 1" in summary["body"]
+    assert summary["torrents"] == [torrent.name]
+
+
+def test_ac_14_cat_update_path_force_auto_tmm_with_ignore_tag_is_relocated(category_module):
+    """AC-14 on the cat_update command, counterpart: an ignore tag lets the move happen."""
+    _, recorder = category_module
+    cat, qbt, _, torrent = _build(
+        settings={
+            "cat_update_relocate": True,
+            "force_auto_tmm": True,
+            "force_auto_tmm_ignore_tags": ["keep-location"],
+        },
+        torrent_kwargs={"tags": "keep-location"},
+    )
+    _wire_client_move(qbt)
+
+    cat.update_cat(torrent, CATEGORY, False)
+
+    assert _call_names(torrent) == ["set_category", "set_location"]
+    assert "set_auto_management" not in _call_names(torrent)
+    assert torrent.calls[1][1] == {"location": TARGET}
+    assert qbt.relocate_torrent_calls == [(torrent, TARGET)]
+    assert cat._relocation_counters()["skipped"] == {}
+    assert _skip_lines(recorder) == []
+    assert f"Relocated {torrent.name} to {TARGET}." in recorder.messages
+    assert [attr["title"] for attr in cat.notify_attr] == ["Relocating Torrents", "Updating Categories"]
