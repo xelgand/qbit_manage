@@ -60,3 +60,9 @@ on the finished feature.
 - Failure looks like: a scenario skipped or asserted vacuously, or a criterion with no test.
 
 Covered by `TST008`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/12
+- Commit: `0c2f5c1` (test(T008): add executable acceptance tests for relocation flows)
+- Merge: `d000e9630f481a2f5ad214b7771bb87c9b25666a` into `specbound/E001-relocate-torrents-to-category-path`
