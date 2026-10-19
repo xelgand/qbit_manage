@@ -48,6 +48,18 @@ class RecordingLogger:
         return None
 
 
+class StaleCategoryTorrent(FakeTorrent):
+    """Mimic qbittorrentapi: ``set_category`` sends the request but keeps the old category.
+
+    ``TorrentDictionary.set_category`` never mutates the local object, so reading
+    ``torrent.category`` after a category change returns the previous one; this stand-in keeps
+    that behaviour visible to the relocation tests.
+    """
+
+    def set_category(self, category):
+        self._record("set_category", category=category)
+
+
 @pytest.fixture
 def category_module(monkeypatch):
     """Patch the category module logger for the duration of one test only."""
@@ -106,6 +118,32 @@ def test_relocate_issues_the_move_and_records_the_success(category_module):
 
 
 # ── failed relocation ─────────────────────────────────────────────────────────
+
+
+def test_relocation_attribute_reports_the_post_change_category(category_module):
+    cat, qbt, cfg, torrent = _build(
+        torrent=StaleCategoryTorrent(name="Stale.Torrent", category="", save_path="/data/downloads/Stale.Torrent")
+    )
+    torrent.set_category(category="Movies")
+    assert torrent.category == ""
+
+    assert cat.relocate(torrent, TARGET, category="Movies") is True
+
+    assert qbt.relocate_torrent_calls == [(torrent, TARGET)]
+    assert cfg.notifications_sent == []
+    assert cat.notify_attr[0]["torrent_category"] == "Movies"
+
+
+def test_relocation_failure_attribute_reports_the_post_change_category(category_module):
+    cat, _, _, torrent = _build(
+        relocate_result=False,
+        torrent=StaleCategoryTorrent(name="Stale.Torrent", category="", save_path="/data/downloads/Stale.Torrent"),
+    )
+    torrent.set_category(category="Movies")
+
+    assert cat.relocate(torrent, TARGET, category="Movies") is False
+
+    assert cat.notify_attr[0]["torrent_category"] == "Movies"
 
 
 def test_relocate_reports_a_failure_without_counting_or_raising(category_module):
