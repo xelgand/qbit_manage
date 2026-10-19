@@ -72,3 +72,9 @@ configuration surfaces.
   summary asserted on `notify_attr` instead of the direct send.
 
 Covered by `TST010`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/14
+- Commit: `3a0f22c` (test(T010): add operational acceptance tests for the relocation feature)
+- Merge: `48ae6e013801bc224facd0021eebc7e8628eeb3b` into `specbound/E001-relocate-torrents-to-category-path`
