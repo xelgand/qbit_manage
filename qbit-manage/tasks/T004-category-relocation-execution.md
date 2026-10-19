@@ -91,3 +91,9 @@ ends with one summary entry carrying those counts.
   or the summary travelling through `notify_attr` (which the grouping path would rewrite).
 
 Covered by `TST004`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/9
+- Commit: `abb7849` (feat(T004): perform relocations with reporting and counters)
+- Merge: `e85924bf3d4146ee4160fac1975ad6454c2f6e5a` into `specbound/E001-relocate-torrents-to-category-path`
