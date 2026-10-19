@@ -71,3 +71,9 @@ limitation the feature accepts.
   relocation works for ATM-managed torrents.
 
 Covered by `TST007`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/7
+- Commit: `7cd8b2b` (docs(T007): document relocation behavior, guards and limits)
+- Merge: `ddef31c` into `specbound/E001-relocate-torrents-to-category-path`
