@@ -301,11 +301,15 @@ class Category:
             self._relocation_counters_state = counters
         return counters
 
-    def _relocation_attribute(self, torrent, title, body):
+    def _relocation_attribute(self, torrent, title, body, category=None):
         """Build the notification attribute for one relocation outcome.
 
         Mirrors the shape of the category-update attribute built in ``update_cat`` so the existing
-        grouping path in ``Webhooks.notify`` can read it.
+        grouping path in ``Webhooks.notify`` can read it. ``category`` is the post-change category
+        when a caller changed it first: ``TorrentDictionary.set_category`` only sends the API
+        request and leaves the local object's category stale, so reading ``torrent.category`` after
+        a category change would report the old one. ``None`` keeps the torrent's own category,
+        which is correct for paths that change no category (the alignment pass, a refusal).
         """
         tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
         return {
@@ -313,14 +317,18 @@ class Category:
             "title": title,
             "body": "\n".join(body + [logger.insert_space(f"Tracker: {tracker['url']}", 8)]),
             "torrents": [torrent.name],
-            "torrent_category": torrent.category,
+            "torrent_category": torrent.category if category is None else category,
             "torrent_tag": ", ".join(tracker["tag"]),
             "torrent_tracker": tracker["url"],
             "notifiarr_indexer": tracker["notifiarr"],
         }
 
-    def relocate(self, torrent, target):
-        """Move a torrent to the target path and report whether the move happened."""
+    def relocate(self, torrent, target, category=None):
+        """Move a torrent to the target path and report whether the move happened.
+
+        ``category`` is the category the torrent now has when the caller changed it in the same
+        step; the default reports the category already on the torrent.
+        """
         relocated = self.qbt.relocate_torrent(torrent, target)
         counters = self._relocation_counters()
         if relocated:
@@ -333,6 +341,7 @@ class Category:
                         logger.insert_space(f"Torrent Name: {torrent.name}", 3),
                         logger.insert_space(f"Relocated To: {target}", 3),
                     ],
+                    category=category,
                 )
             )
             self.torrents_updated.append(torrent.name)
@@ -348,13 +357,18 @@ class Category:
                         logger.insert_space(f"Target: {target}", 3),
                         "The relocation was not performed; the torrent remains where it was.",
                     ],
+                    category=category,
                 )
             )
             counters["failed"] += 1
         return relocated
 
-    def report_refusal(self, torrent, reason):
-        """Log and notify a relocation the guards refused, with its reason."""
+    def report_refusal(self, torrent, reason, category=None):
+        """Log and notify a relocation the guards refused, with its reason.
+
+        A refusal happens before any category change, so ``torrent.category`` is current; the
+        ``category`` override exists for callers that know the intended category explicitly.
+        """
         logger.print_line(f"Refused to relocate {torrent.name}: {reason}.", self.config.loglevel)
         self.notify_attr.append(
             self._relocation_attribute(
@@ -364,6 +378,7 @@ class Category:
                     logger.insert_space(f"Torrent Name: {torrent.name}", 3),
                     logger.insert_space(f"Reason: {reason}", 3),
                 ],
+                category=category,
             )
         )
         self.torrents_updated.append(torrent.name)
