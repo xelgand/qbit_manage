@@ -24,8 +24,8 @@ logger = util.logger
 
 def _paths_overlap(first, second):
     """Check whether two paths are equal or one is an ancestor of the other, segment-wise."""
-    first_segments = os.path.normpath(first).split(os.sep)
-    second_segments = os.path.normpath(second).split(os.sep)
+    first_segments = [segment for segment in os.path.normpath(first).split(os.sep) if segment]
+    second_segments = [segment for segment in os.path.normpath(second).split(os.sep) if segment]
     shared_segments = min(len(first_segments), len(second_segments))
     return first_segments[:shared_segments] == second_segments[:shared_segments]
 

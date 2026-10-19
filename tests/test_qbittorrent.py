@@ -545,6 +545,30 @@ class TestDirectoryPeers:
         assert "unrelated" not in peers
         assert "sibling" not in peers
 
+    def test_root_save_path_is_a_peer_of_a_nested_candidate(self):
+        torrents = [
+            FakeTorrent(hash="candidate", save_path="/data/tv"),
+            FakeTorrent(hash="root", save_path="/"),
+            FakeTorrent(hash="unrelated", save_path="/other"),
+        ]
+        qbt = make_relocation_qbt(torrents)
+
+        peers = Qbt.directory_peers(qbt, "/data/tv", "candidate")
+
+        assert set(peers) == {"root"}
+
+    def test_nested_torrents_are_peers_of_a_root_candidate(self):
+        torrents = [
+            FakeTorrent(hash="candidate", save_path="/"),
+            FakeTorrent(hash="nested", save_path="/data/tv"),
+            FakeTorrent(hash="other", save_path="/data/other"),
+        ]
+        qbt = make_relocation_qbt(torrents)
+
+        peers = Qbt.directory_peers(qbt, "/", "candidate")
+
+        assert set(peers) == {"nested", "other"}
+
     def test_fetches_the_client_list_once(self):
         qbt = make_relocation_qbt(self._torrents())
         Qbt.directory_peers(qbt, "/data/tv", "candidate")
