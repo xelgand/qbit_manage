@@ -66,3 +66,9 @@ in the web UI's settings form.
   from the sample) or a default of `True`.
 
 Covered by `TST001`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/5
+- Commit: `f57fa59` (feat(T001): register relocation configuration keys)
+- Merge: `1311b2f` into `specbound/E001-relocate-torrents-to-category-path`
