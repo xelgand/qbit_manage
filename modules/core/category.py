@@ -233,3 +233,115 @@ class Category:
         self.notify_attr.append(attr)
         self.torrents_updated.append(t_name)
         self.stats += 1
+
+    def _relocation_counters(self):
+        """Return the per-run relocation counters, creating them on first use.
+
+        ``__init__`` belongs to another task, so the counters are created lazily; keeping them on
+        the instance means a run never shares them with another.
+        """
+        counters = vars(self).get("_relocation_counters_state")
+        if counters is None:
+            counters = {"relocated": 0, "failed": 0, "refused": 0, "skipped": {}, "skipped_names": []}
+            self._relocation_counters_state = counters
+        return counters
+
+    def _relocation_attribute(self, torrent, title, body):
+        """Build the notification attribute for one relocation outcome.
+
+        Mirrors the shape of the category-update attribute built in ``update_cat`` so the existing
+        grouping path in ``Webhooks.notify`` can read it.
+        """
+        tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
+        return {
+            "function": "cat_update",
+            "title": title,
+            "body": "\n".join(body + [logger.insert_space(f"Tracker: {tracker['url']}", 8)]),
+            "torrents": [torrent.name],
+            "torrent_category": torrent.category,
+            "torrent_tag": ", ".join(tracker["tag"]),
+            "torrent_tracker": tracker["url"],
+            "notifiarr_indexer": tracker["notifiarr"],
+        }
+
+    def relocate(self, torrent, target):
+        """Move a torrent to the target path and report whether the move happened."""
+        relocated = self.qbt.relocate_torrent(torrent, target)
+        counters = self._relocation_counters()
+        if relocated:
+            logger.print_line(f"Relocated {torrent.name} to {target}.", self.config.loglevel)
+            self.notify_attr.append(
+                self._relocation_attribute(
+                    torrent,
+                    "Relocating Torrents",
+                    [
+                        logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                        logger.insert_space(f"Relocated To: {target}", 3),
+                    ],
+                )
+            )
+            self.torrents_updated.append(torrent.name)
+            counters["relocated"] += 1
+        else:
+            logger.print_line(f"Failed to relocate {torrent.name} to {target}.", self.config.loglevel)
+            self.notify_attr.append(
+                self._relocation_attribute(
+                    torrent,
+                    "Relocation Failed",
+                    [
+                        logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                        logger.insert_space(f"Target: {target}", 3),
+                        "The relocation was not performed; the torrent remains where it was.",
+                    ],
+                )
+            )
+            counters["failed"] += 1
+        return relocated
+
+    def report_refusal(self, torrent, reason):
+        """Log and notify a relocation the guards refused, with its reason."""
+        logger.print_line(f"Refused to relocate {torrent.name}: {reason}.", self.config.loglevel)
+        self.notify_attr.append(
+            self._relocation_attribute(
+                torrent,
+                "Relocation Refused",
+                [
+                    logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                    logger.insert_space(f"Reason: {reason}", 3),
+                ],
+            )
+        )
+        self.torrents_updated.append(torrent.name)
+        self._relocation_counters()["refused"] += 1
+
+    def report_skip(self, torrent, plan):
+        """Log and count a skipped relocation; skips are never notified per torrent."""
+        logger.print_line(f"Skipping relocation for {torrent.name}: {plan.reason}.", self.config.loglevel)
+        counters = self._relocation_counters()
+        skipped = counters["skipped"]
+        skipped[plan.reason] = skipped.get(plan.reason, 0) + 1
+        counters["skipped_names"].append(torrent.name)
+
+    def relocation_skip_summary(self):
+        """Send the run's skip summary directly, bypassing the grouping path.
+
+        ``Webhooks.notify`` groups by ``torrent_category`` and rewrites bodies when a bucket holds
+        more than one torrent, so the category-independent summary is sent here instead.
+        """
+        counters = self._relocation_counters()
+        if not counters["skipped"]:
+            return
+        body = [f"Relocation skipped for {sum(counters['skipped'].values())} torrent(s):"]
+        body += [logger.insert_space(f"{reason}: {count}", 3) for reason, count in counters["skipped"].items()]
+        self.config.send_notifications(
+            {
+                "function": "cat_update",
+                "title": "Relocation Skipped",
+                "body": "\n".join(body),
+                "torrents": list(counters["skipped_names"]),
+                "torrent_category": None,
+                "torrent_tag": None,
+                "torrent_tracker": None,
+                "notifiarr_indexer": None,
+            }
+        )

@@ -365,6 +365,7 @@ class FakeQbtManager:
         torrentvalid=None,
         category_paths=None,
         has_shared_files=False,
+        relocate_result=True,
     ):
         self.config = config or FakeConfig()
         self.client = client or FakeClient()
@@ -372,6 +373,8 @@ class FakeQbtManager:
         self.category_paths = dict(category_paths or {})
         self.shared_files = has_shared_files
         self.has_shared_files_calls = []
+        self.relocate_result = relocate_result
+        self.relocate_torrent_calls = []
         self.torrentinfo = torrentinfo or {}
         self.global_max_ratio = global_max_ratio
         self.global_max_ratio_enabled = global_max_ratio_enabled
@@ -441,6 +444,11 @@ class FakeQbtManager:
         """Report the configured cross-seed answer and record the check."""
         self.has_shared_files_calls.append((torrent_hash, save_path))
         return self.shared_files
+
+    def relocate_torrent(self, torrent, target):
+        """Record the move and report the configured outcome."""
+        self.relocate_torrent_calls.append((torrent, target))
+        return self.relocate_result
 
     @property
     def torrent_list(self):
