@@ -115,6 +115,20 @@ export const settingsSchema = {
             default: true
         },
         {
+            name: 'cat_update_relocate',
+            type: 'boolean',
+            label: 'Category Update Relocate',
+            description: 'If true, `cat_update` will relocate torrents to their category path. Moves data on disk; disabled by default.',
+            default: false
+        },
+        {
+            name: 'cat_change_relocate',
+            type: 'boolean',
+            label: 'Category Change Relocate',
+            description: 'If true, `cat_change` will relocate torrents to their new category path. Moves data on disk; disabled by default.',
+            default: false
+        },
+        {
             name: 'disable_qbt_default_share_limits',
             type: 'boolean',
             label: 'Disable qBittorrent Default Share Limits',

@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from modules.config import Config
-from modules.util import Failed
+from modules.util import Failed, check
 
 
 def _make_config(data: dict) -> Config:
@@ -122,3 +122,52 @@ class TestProcessConfigNohardlinks:
 
         with pytest.raises(Failed, match="ignore_category_dir must be a boolean type"):
             cfg.process_config_nohardlinks()
+
+
+def _load_settings(directory, overrides: dict) -> dict:
+    """Run process_config_settings() against a temporary config file."""
+    directory.mkdir(parents=True, exist_ok=True)
+    config_file = directory / "config.yml"
+    config_file.write_text("settings: {}\n", encoding="utf-8")
+
+    cfg = object.__new__(Config)
+    cfg.config_path = str(config_file)
+    cfg.data = {"settings": dict(overrides)}
+    cfg.util = check(cfg)
+    cfg.process_config_settings()
+    return cfg.settings
+
+
+class TestProcessConfigSettingsRelocate:
+    """cat_update_relocate and cat_change_relocate are opt-in booleans."""
+
+    RELOCATE_KEYS = ["cat_update_relocate", "cat_change_relocate"]
+
+    @pytest.mark.parametrize("key", RELOCATE_KEYS)
+    def test_defaults_to_false_when_absent(self, tmp_path, key):
+        settings = _load_settings(tmp_path, {})
+
+        assert settings[key] is False
+
+    @pytest.mark.parametrize("key", RELOCATE_KEYS)
+    def test_loads_true_when_set(self, tmp_path, key):
+        settings = _load_settings(tmp_path, {key: True})
+
+        assert settings[key] is True
+
+    @pytest.mark.parametrize("key", RELOCATE_KEYS)
+    def test_non_boolean_is_rejected(self, tmp_path, key):
+        with pytest.raises(Failed, match=rf"settings sub-attribute {key} must be either true or false"):
+            _load_settings(tmp_path, {key: "true"})
+
+    def test_relocate_keys_leave_other_settings_untouched(self, tmp_path):
+        without = _load_settings(tmp_path / "without", {})
+        with_keys = _load_settings(
+            tmp_path / "with",
+            {"cat_update_relocate": True, "cat_change_relocate": True},
+        )
+
+        for key in self.RELOCATE_KEYS:
+            without.pop(key)
+            with_keys.pop(key)
+        assert with_keys == without
