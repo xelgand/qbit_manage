@@ -14,8 +14,8 @@
 This is a program used to manage your qBittorrent instance such as:
 
 * Tag torrents based on tracker URLs
-* Apply category based on `save_path` to uncategorized torrents in category's `save_path`
-* Change categories based on current category (`cat_change`)
+* Apply category based on `save_path` to uncategorized torrents in category's `save_path`, and optionally relocate their data to the category's configured path (`cat_update_relocate`)
+* Change categories based on current category (`cat_change`), and optionally relocate the data to the new category's configured path (`cat_change_relocate`)
 * Remove unregistered torrents (delete data & torrent if it is not being cross-seeded, otherwise it will just remove the torrent)
 * Recheck paused torrents sorted by lowest size and resume if completed
 * Remove orphaned files from your root directory that are not referenced by qBittorrent

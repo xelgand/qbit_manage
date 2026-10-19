@@ -83,3 +83,9 @@ target path, or a no-op with the reason that stopped it, or a refusal, without c
   refused.
 
 Covered by `TST003`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/8
+- Commits: `45c307a` (feat(T003): evaluate relocation guards on Category), `ee77eac` (fix(T003): keep relocation plan tests isolated from logger bootstrap)
+- Merge: `e653090ae4fffd95d10f02231c7793540beb72ca` into `specbound/E001-relocate-torrents-to-category-path`

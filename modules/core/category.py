@@ -1,4 +1,6 @@
+import os
 import time
+from dataclasses import dataclass
 
 from qbittorrentapi import Conflict409Error
 
@@ -6,6 +8,37 @@ from modules import util
 from modules.qbit_error_handler import handle_qbit_api_errors
 
 logger = util.logger
+
+RELOCATION_ACTION_RELOCATE = "relocate"
+RELOCATION_ACTION_SKIP = "skip"
+RELOCATION_ACTION_REFUSE = "refuse"
+
+RELOCATION_SKIP_AUTO_TMM = "Automatic Torrent Management"
+RELOCATION_SKIP_NO_CONFIGURED_PATH = "no unambiguous configured path"
+RELOCATION_SKIP_INCOMPLETE = "incomplete"
+RELOCATION_SKIP_ALREADY_IN_PLACE = "already in place"
+RELOCATION_REFUSE_CROSS_SEED = "cross-seed"
+
+
+@dataclass(frozen=True)
+class RelocationPlan:
+    """Outcome of evaluating the relocation guards for one torrent."""
+
+    action: str
+    reason: str | None = None
+    target: str | None = None
+
+    @property
+    def relocates(self) -> bool:
+        return self.action == RELOCATION_ACTION_RELOCATE
+
+
+def _skip(reason: str) -> RelocationPlan:
+    return RelocationPlan(action=RELOCATION_ACTION_SKIP, reason=reason)
+
+
+def _refuse(reason: str) -> RelocationPlan:
+    return RelocationPlan(action=RELOCATION_ACTION_REFUSE, reason=reason)
 
 
 class Category:
@@ -22,6 +55,10 @@ class Category:
         self.cat_update_all = self.config.settings["cat_update_all"]
         self.category()
         self.change_categories()
+        if self.relocation_enabled(cat_change=False):
+            self.align_locations()
+        if self.relocation_enabled(cat_change=False) or self.relocation_enabled(cat_change=True):
+            self.relocation_skip_summary()
         self.config.webhooks_factory.notify(self.torrents_updated, self.notify_attr, group_by="category")
 
     def category(self):
@@ -109,11 +146,97 @@ class Category:
         tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
         return [tracker["cat"]] if tracker["cat"] else None
 
+    def relocation_enabled(self, cat_change):
+        """Report whether relocation is enabled for the selected command path."""
+        return self.config.settings["cat_change_relocate" if cat_change else "cat_update_relocate"]
+
+    def _effective_auto_tmm(self, torrent, category_change):
+        """Report whether qBittorrent governs the torrent's location for this plan.
+
+        ``category_change`` is not the command flag: it says whether the evaluation accompanies a
+        category change that may hand the location to Automatic Torrent Management.
+        """
+        if torrent.auto_tmm:
+            return True
+        if not category_change or not self.config.settings["force_auto_tmm"]:
+            return False
+        ignore_tags = self.config.settings.get("force_auto_tmm_ignore_tags", [])
+        return not any(tag in (torrent.tags or "") for tag in ignore_tags)
+
+    def relocation_plan(self, torrent, category, category_change):
+        """Evaluate the relocation guards for one torrent without changing anything.
+
+        ``category_change`` marks an evaluation that accompanies a category change and the
+        Automatic Torrent Management it may enable; the alignment pass passes ``False``.
+        """
+        if self._effective_auto_tmm(torrent, category_change):
+            return _skip(RELOCATION_SKIP_AUTO_TMM)
+        target = self.qbt.category_config_path(category)
+        if target is None:
+            return _skip(RELOCATION_SKIP_NO_CONFIGURED_PATH)
+        if not torrent.state_enum.is_complete:
+            return _skip(RELOCATION_SKIP_INCOMPLETE)
+        if os.path.join(torrent.save_path, "") == os.path.join(target, ""):
+            return _skip(RELOCATION_SKIP_ALREADY_IN_PLACE)
+        if self.qbt.has_shared_files(torrent.hash, torrent.save_path):
+            return _refuse(RELOCATION_REFUSE_CROSS_SEED)
+        return RelocationPlan(action=RELOCATION_ACTION_RELOCATE, target=target)
+
+    def align_locations(self):
+        """Relocate already-categorized torrents to their category's configured path.
+
+        The category is trusted as correct: this pass never writes one. It runs after the category
+        writes so a torrent that just received a category is evaluated against it.
+        """
+        logger.separator("Aligning Torrent Locations", space=False, border=False)
+        torrent_list_filter = {"status_filter": self.status_filter}
+        if self.hashes:
+            torrent_list_filter["torrent_hashes"] = self.hashes
+        torrent_list = self.qbt.get_torrents(torrent_list_filter)
+        for torrent in torrent_list:
+            if not torrent.category or torrent.category == self.uncategorized_mapping:
+                continue
+            plan = self.relocation_plan(torrent, torrent.category, category_change=False)
+            if plan.action == RELOCATION_ACTION_REFUSE:
+                self.report_refusal(torrent, plan.reason)
+            elif plan.action == RELOCATION_ACTION_SKIP:
+                self.report_skip(torrent, plan)
+            elif self.config.dry_run:
+                logger.print_line(f"Would relocate {torrent.name} to {plan.target}.", self.config.loglevel)
+            else:
+                self.relocate(torrent, plan.target)
+        self._log_relocation_summary()
+
+    def _log_relocation_summary(self):
+        """Log the run's relocation counts per reason, from the counters the summary uses."""
+        counters = self._relocation_counters()
+        skipped = counters["skipped"]
+        summary = (
+            f"Relocation summary: {counters['relocated']} relocated, "
+            f"{counters['failed']} failed, {counters['refused']} refused, "
+            f"{sum(skipped.values())} skipped"
+        )
+        if skipped:
+            summary += " (" + ", ".join(f"{reason}: {count}" for reason, count in skipped.items()) + ")"
+        logger.print_line(summary + ".", self.config.loglevel)
+
     def update_cat(self, torrent, new_cat, cat_change):
         """Update category based on the torrent information"""
         tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
         t_name = torrent.name
         old_cat = torrent.category
+        plan = None
+        if self.relocation_enabled(cat_change):
+            # Both commands reach this method, and the change it performs may enable Automatic
+            # Torrent Management for an ATM-off torrent, so the plan always sees a category change.
+            plan = self.relocation_plan(torrent, new_cat, category_change=True)
+            if plan.action == RELOCATION_ACTION_REFUSE:
+                self.report_refusal(torrent, plan.reason)
+                return
+            if plan.action == RELOCATION_ACTION_SKIP:
+                self.report_skip(torrent, plan)
+            elif self.config.dry_run:
+                logger.print_line(f"Would relocate {t_name} to {plan.target}.", self.config.loglevel)
         if not self.config.dry_run:
 
             @handle_qbit_api_errors(context="set_category", retry_attempts=2)
@@ -148,8 +271,11 @@ class Category:
                         torrent.set_category(category=new_cat)
                     else:
                         raise
+                return True
 
-            set_category_with_creation()
+            category_updated = set_category_with_creation()
+            if category_updated and plan is not None and plan.action == RELOCATION_ACTION_RELOCATE:
+                self.relocate(torrent, plan.target, category=new_cat)
         body = []
         body += logger.print_line(logger.insert_space(f"Torrent Name: {t_name}", 3), self.config.loglevel)
         if cat_change:
@@ -172,3 +298,130 @@ class Category:
         self.notify_attr.append(attr)
         self.torrents_updated.append(t_name)
         self.stats += 1
+
+    def _relocation_counters(self):
+        """Return the per-run relocation counters, creating them on first use.
+
+        ``__init__`` belongs to another task, so the counters are created lazily; keeping them on
+        the instance means a run never shares them with another.
+        """
+        counters = vars(self).get("_relocation_counters_state")
+        if counters is None:
+            counters = {"relocated": 0, "failed": 0, "refused": 0, "skipped": {}, "skipped_names": []}
+            self._relocation_counters_state = counters
+        return counters
+
+    def _relocation_attribute(self, torrent, title, body, category=None):
+        """Build the notification attribute for one relocation outcome.
+
+        Mirrors the shape of the category-update attribute built in ``update_cat`` so the existing
+        grouping path in ``Webhooks.notify`` can read it. ``category`` is the post-change category
+        when a caller changed it first: ``TorrentDictionary.set_category`` only sends the API
+        request and leaves the local object's category stale, so reading ``torrent.category`` after
+        a category change would report the old one. ``None`` keeps the torrent's own category,
+        which is correct for paths that change no category (the alignment pass, a refusal).
+        """
+        tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
+        return {
+            "function": "cat_update",
+            "title": title,
+            "body": "\n".join(body + [logger.insert_space(f"Tracker: {tracker['url']}", 8)]),
+            "torrents": [torrent.name],
+            "torrent_category": torrent.category if category is None else category,
+            "torrent_tag": ", ".join(tracker["tag"]),
+            "torrent_tracker": tracker["url"],
+            "notifiarr_indexer": tracker["notifiarr"],
+        }
+
+    def relocate(self, torrent, target, category=None):
+        """Move a torrent to the target path and report whether the move happened.
+
+        ``category`` is the category the torrent now has when the caller changed it in the same
+        step; the default reports the category already on the torrent.
+        """
+        relocated = self.qbt.relocate_torrent(torrent, target)
+        counters = self._relocation_counters()
+        if relocated:
+            logger.print_line(f"Relocated {torrent.name} to {target}.", self.config.loglevel)
+            self.notify_attr.append(
+                self._relocation_attribute(
+                    torrent,
+                    "Relocating Torrents",
+                    [
+                        logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                        logger.insert_space(f"Relocated To: {target}", 3),
+                    ],
+                    category=category,
+                )
+            )
+            self.torrents_updated.append(torrent.name)
+            counters["relocated"] += 1
+        else:
+            logger.print_line(f"Failed to relocate {torrent.name} to {target}.", self.config.loglevel)
+            self.notify_attr.append(
+                self._relocation_attribute(
+                    torrent,
+                    "Relocation Failed",
+                    [
+                        logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                        logger.insert_space(f"Target: {target}", 3),
+                        "The relocation was not performed; the torrent remains where it was.",
+                    ],
+                    category=category,
+                )
+            )
+            counters["failed"] += 1
+        return relocated
+
+    def report_refusal(self, torrent, reason, category=None):
+        """Log and notify a relocation the guards refused, with its reason.
+
+        A refusal happens before any category change, so ``torrent.category`` is current; the
+        ``category`` override exists for callers that know the intended category explicitly.
+        """
+        logger.print_line(f"Refused to relocate {torrent.name}: {reason}.", self.config.loglevel)
+        self.notify_attr.append(
+            self._relocation_attribute(
+                torrent,
+                "Relocation Refused",
+                [
+                    logger.insert_space(f"Torrent Name: {torrent.name}", 3),
+                    logger.insert_space(f"Reason: {reason}", 3),
+                ],
+                category=category,
+            )
+        )
+        self.torrents_updated.append(torrent.name)
+        self._relocation_counters()["refused"] += 1
+
+    def report_skip(self, torrent, plan):
+        """Log and count a skipped relocation; skips are never notified per torrent."""
+        logger.print_line(f"Skipping relocation for {torrent.name}: {plan.reason}.", self.config.loglevel)
+        counters = self._relocation_counters()
+        skipped = counters["skipped"]
+        skipped[plan.reason] = skipped.get(plan.reason, 0) + 1
+        counters["skipped_names"].append(torrent.name)
+
+    def relocation_skip_summary(self):
+        """Send the run's skip summary directly, bypassing the grouping path.
+
+        ``Webhooks.notify`` groups by ``torrent_category`` and rewrites bodies when a bucket holds
+        more than one torrent, so the category-independent summary is sent here instead.
+        """
+        counters = self._relocation_counters()
+        if not counters["skipped"]:
+            return
+        body = [f"Relocation skipped for {sum(counters['skipped'].values())} torrent(s):"]
+        body += [logger.insert_space(f"{reason}: {count}", 3) for reason, count in counters["skipped"].items()]
+        self.config.send_notifications(
+            {
+                "function": "cat_update",
+                "title": "Relocation Skipped",
+                "body": "\n".join(body),
+                "torrents": list(counters["skipped_names"]),
+                "torrent_category": None,
+                "torrent_tag": None,
+                "torrent_tracker": None,
+                "notifiarr_indexer": None,
+            }
+        )

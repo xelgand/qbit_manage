@@ -79,3 +79,9 @@ that reports whether it happened.
   returning `True`/`None` after a swallowed error.
 
 Covered by `TST002`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/6
+- Commits: `9357bdb` (feat(T002): add relocation primitives to Qbt), `58380eb` (fix(T002): treat root save path as an ancestor in peer selection)
+- Merge: `2eb160f1a80ed29bc1d212f2575d943cf23e9cde` into `specbound/E001-relocate-torrents-to-category-path`
