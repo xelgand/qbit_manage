@@ -127,7 +127,7 @@ This section defines any settings defined in the configuration.
 | `tag_nohardlinks_filter_completed`  | When running `--tag-nohardlinks` function, , it will filter for completed torrents only.                                                                                                                                                                                                                                                        | True                      | <center>❌</center> |
 | `cat_update_all`                    | When running `--cat-update` function, it will check and update all torrents categories, otherwise it will only update uncategorized torrents.                                                                                                                                                                                                   | True                      | <center>❌</center> |
 | `cat_update_relocate`               | When running `--cat-update` function, it will relocate torrents to their category path. Moves data on disk and is disabled by default.                                                                                                                                                                                                           | False                     | <center>❌</center> |
-| `cat_change_relocate`               | When running `--cat-change` function, it will relocate torrents to their new category path. Moves data on disk and is disabled by default.                                                                                                                                                                                                       | False                     | <center>❌</center> |
+| `cat_change_relocate`               | When running `--cat-update` function, it will relocate torrents to their new category path for the `cat_change` section. Moves data on disk and is disabled by default.                                                                                                                                                                           | False                     | <center>❌</center> |
 | `disable_qbt_default_share_limits`  | When running `--share-limits` function, it allows QBM to handle share limits by disabling qBittorrents default Share limits.                                                                                                                                                                                                                    | True                      | <center>❌</center> |
 | `tag_stalled_torrents`              | Tags any downloading torrents that are stalled with the user defined `stalledDL` tag when running the tag_update command                                                                                                                                                                                                                        | True                      | <center>❌</center> |
 | `stalled_tag`                       | Tag applied to torrents in `stalledDL` state when `tag_stalled_torrents: true`. Customizable. Reference: `modules/config.py:304`.                                                                                                                                                                                                               | stalledDL                 | <center>❌</center> |
@@ -185,16 +185,16 @@ category: <path>/<to>/category
 
 Relocation moves a torrent's data on disk to the path configured for its category in this section.
 It is opt-in and off by default; the two settings keys are independent, so enabling one does not
-enable the other. Relocation applies only to `--cat-update` and `--cat-change`; no other command
-relocates data and there are no additional CLI flags.
+enable the other. Relocation applies only to the `cat` and `cat_change` sections, which the
+`--cat-update` command runs; no other command relocates data and there are no additional CLI flags.
 
-- `cat_update_relocate: true` — `--cat-update` assigns the category and relocates the torrent to
-  that category's configured path. It also runs an alignment pass: torrents that already carry a
-  category but sit outside that category's configured path are moved to it. The alignment pass
-  changes no category.
-- `cat_change_relocate: true` — `--cat-change` switches the category and, once the switch succeeds,
-  relocates the torrent to the new category's configured path. A failed category change therefore
-  never leaves a moved torrent in the wrong category.
+- `cat_update_relocate: true` — `--cat-update` assigns the category from the `cat` section and
+  relocates the torrent to that category's configured path. It also runs an alignment pass:
+  torrents that already carry a category but sit outside that category's configured path are moved
+  to it. The alignment pass changes no category.
+- `cat_change_relocate: true` — the `cat_change` section, also run by `--cat-update`, switches the
+  category and, once the switch succeeds, relocates the torrent to the new category's configured
+  path. A failed category change therefore never leaves a moved torrent in the wrong category.
 
 The target is the literal value configured in `cat:` for that category (used as-is, in
 qBittorrent's path space). qBit Manage does not change qBittorrent's per-category save path, and
@@ -215,7 +215,7 @@ is a **skip** that leaves the command's own category change untouched.
 | The category is absent from this section, its value contains a wildcard (`*`, `?`, `[`), or it is the `Uncategorized` list       | **Skipped.** There is no single literal path to relocate to; the category change still applies.                                                                                                                                      |
 | The torrent has not completed downloading                                                                                        | **Skipped.** The category change still applies.                                                                                                                                                                                      |
 | The torrent already sits at its category's configured path                                                                       | **Skipped.** No move is needed; the category change still applies.                                                                                                                                                                   |
-| A cross-seed sibling shares a file path with the torrent (evaluated among torrents whose save paths are equal to, above or below it) | **Refused.** Neither the relocation nor, in `--cat-update`/`--cat-change`, the category change is requested. The alignment pass has no category change to withhold, so it withholds only the relocation. |
+| A cross-seed sibling shares a file path with the torrent (evaluated among torrents whose save paths are equal to, above or below it) | **Refused.** Neither the relocation nor, in the category-change path run by `--cat-update`, the category change is requested. The alignment pass has no category change to withhold, so it withholds only the relocation. |
 
 A cross-seed refusal withholds the category change too because changing the category can make
 qBittorrent move the files itself under Automatic Torrent Management — the same implicit move this
@@ -253,7 +253,8 @@ This moves all the torrents from one category to another category if the torrent
 > [!CAUTION]
 > If the paths are different and Default Torrent Management Mode is set to Automatic the files could be moved !!!
 
-With `cat_change_relocate: true`, the torrent is also relocated to the new category's configured
+The `cat_change` section is executed by the `--cat-update` command. With
+`cat_change_relocate: true`, the torrent is also relocated to the new category's configured
 `cat:` path after the category switch succeeds. The guards described in
 [Relocating torrents to the configured category path](#relocating-torrents-to-the-configured-category-path)
 apply: Automatic Torrent Management torrents — including those this run's `force_auto_tmm` is
