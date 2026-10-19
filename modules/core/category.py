@@ -219,9 +219,10 @@ class Category:
                         torrent.set_category(category=new_cat)
                     else:
                         raise
+                return True
 
-            set_category_with_creation()
-            if plan is not None and plan.action == RELOCATION_ACTION_RELOCATE:
+            category_updated = set_category_with_creation()
+            if category_updated and plan is not None and plan.action == RELOCATION_ACTION_RELOCATE:
                 self.relocate(torrent, plan.target)
         body = []
         body += logger.print_line(logger.insert_space(f"Torrent Name: {t_name}", 3), self.config.loglevel)

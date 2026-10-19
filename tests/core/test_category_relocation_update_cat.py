@@ -128,6 +128,31 @@ def test_update_cat_reads_the_cat_change_key_on_that_path(category_module):
     assert any(f"Relocated {torrent.name} to {TARGET}" in message for message in recorder.messages)
 
 
+def test_update_cat_does_not_relocate_when_the_category_change_fails(category_module):
+    from qbittorrentapi import InvalidRequest400Error
+
+    _, recorder = category_module
+    cat, qbt, _, torrent = _build(
+        settings={"cat_update_relocate": True},
+        category_paths={"Movies": "/data/media/Movies"},
+    )
+    _wire_client_move(qbt)
+
+    def failing_set_category(category):
+        raise InvalidRequest400Error("category rejected by client")
+
+    torrent.set_category = failing_set_category
+
+    cat.update_cat(torrent, "Movies", False)
+
+    # The handler swallowed the API error, so the category is unchanged: no move may follow.
+    assert torrent.calls == []
+    assert qbt.relocate_torrent_calls == []
+    assert torrent.category == "Downloads"
+    assert cat._relocation_counters()["relocated"] == 0
+    assert [attr["title"] for attr in cat.notify_attr] == ["Updating Categories"]
+
+
 # ── refusal withholds the whole torrent ──────────────────────────────────────
 
 
