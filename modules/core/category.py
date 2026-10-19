@@ -175,6 +175,16 @@ class Category:
         tracker = self.qbt.get_tags(self.qbt.get_tracker_urls(torrent.trackers))
         t_name = torrent.name
         old_cat = torrent.category
+        plan = None
+        if self.relocation_enabled(cat_change):
+            plan = self.relocation_plan(torrent, new_cat, cat_change)
+            if plan.action == RELOCATION_ACTION_REFUSE:
+                self.report_refusal(torrent, plan.reason)
+                return
+            if plan.action == RELOCATION_ACTION_SKIP:
+                self.report_skip(torrent, plan)
+            elif self.config.dry_run:
+                logger.print_line(f"Would relocate {t_name} to {plan.target}.", self.config.loglevel)
         if not self.config.dry_run:
 
             @handle_qbit_api_errors(context="set_category", retry_attempts=2)
@@ -209,8 +219,11 @@ class Category:
                         torrent.set_category(category=new_cat)
                     else:
                         raise
+                return True
 
-            set_category_with_creation()
+            category_updated = set_category_with_creation()
+            if category_updated and plan is not None and plan.action == RELOCATION_ACTION_RELOCATE:
+                self.relocate(torrent, plan.target)
         body = []
         body += logger.print_line(logger.insert_space(f"Torrent Name: {t_name}", 3), self.config.loglevel)
         if cat_change:
