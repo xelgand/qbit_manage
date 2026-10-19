@@ -86,3 +86,9 @@ behaves exactly as before.
   receiving `set_category`, or a dry run issuing a client call.
 
 Covered by `TST005`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/10
+- Commits: `ef69c9d` (feat(T005): evaluate and execute relocation in update_cat), `59aaf71` (fix(T005): gate relocation on the category change succeeding)
+- Merge: `62aa18835632e7f206971057d46c73480f8aed67` into `specbound/E001-relocate-torrents-to-category-path`
