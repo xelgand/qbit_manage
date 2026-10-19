@@ -8,18 +8,23 @@ from __future__ import annotations
 
 import pytest
 
-from modules.core.category import RELOCATION_ACTION_REFUSE
-from modules.core.category import RELOCATION_ACTION_RELOCATE
-from modules.core.category import RELOCATION_ACTION_SKIP
-from modules.core.category import RELOCATION_REFUSE_CROSS_SEED
-from modules.core.category import RELOCATION_SKIP_ALREADY_IN_PLACE
-from modules.core.category import RELOCATION_SKIP_AUTO_TMM
-from modules.core.category import RELOCATION_SKIP_INCOMPLETE
-from modules.core.category import RELOCATION_SKIP_NO_CONFIGURED_PATH
 from tests.factories import FakeConfig
 from tests.factories import FakeQbtManager
 from tests.factories import FakeTorrent
 from tests.factories import make_category
+
+# Literal outcome contract. Importing these from modules.core.category at module
+# scope would import Category during collection, before the autouse fake_logger
+# fixture runs, leaving the module-level logger bound to the unset proxy and
+# breaking the other Category test modules in a combined run.
+RELOCATION_ACTION_RELOCATE = "relocate"
+RELOCATION_ACTION_SKIP = "skip"
+RELOCATION_ACTION_REFUSE = "refuse"
+RELOCATION_SKIP_AUTO_TMM = "Automatic Torrent Management"
+RELOCATION_SKIP_NO_CONFIGURED_PATH = "no unambiguous configured path"
+RELOCATION_SKIP_INCOMPLETE = "incomplete"
+RELOCATION_SKIP_ALREADY_IN_PLACE = "already in place"
+RELOCATION_REFUSE_CROSS_SEED = "cross-seed"
 
 CATEGORY = "Movies"
 CONFIGURED_PATH = "/data/media/Movies"
