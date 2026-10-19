@@ -86,3 +86,9 @@ outside that category's configured path is relocated to it, without its category
   leave the run.
 
 Covered by `TST006`.
+
+## Evidence
+
+- Pull request: https://github.com/xelgand/qbit_manage/pull/11
+- Commit: `df3a19b` (feat(T006): align categorized torrents with category paths)
+- Merge: `b88c8a8c98167e78534a3368f22f670b702e865c` into `specbound/E001-relocate-torrents-to-category-path`
