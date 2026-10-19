@@ -22,6 +22,14 @@ from modules.util import list_in_text
 logger = util.logger
 
 
+def _paths_overlap(first, second):
+    """Check whether two paths are equal or one is an ancestor of the other, segment-wise."""
+    first_segments = [segment for segment in os.path.normpath(first).split(os.sep) if segment]
+    second_segments = [segment for segment in os.path.normpath(second).split(os.sep) if segment]
+    shared_segments = min(len(first_segments), len(second_segments))
+    return first_segments[:shared_segments] == second_segments[:shared_segments]
+
+
 class Qbt:
     """
     Qbittorrent Class
@@ -129,6 +137,10 @@ class Qbt:
         self.get_tags = cache(self.get_tags)
         self.get_category = cache(self.get_category)
         self.get_category_save_paths = cache(self.get_category_save_paths)
+        self.category_config_path = cache(self.category_config_path)
+        self.get_all_torrents = cache(self.get_all_torrents)
+        self._directory_peer_hashes = cache(self._directory_peer_hashes)
+        self.torrent_file_paths = cache(self.torrent_file_paths)
 
     def get_torrent_info(self):
         """
@@ -485,6 +497,70 @@ class Qbt:
         # Also add root_dir to the list
         save_paths.add(self.config.remote_dir)
         return list(save_paths)
+
+    def category_config_path(self, category):
+        """Get the literal configured save path for a category, or None when it is not usable."""
+        if "cat" not in self.config.data or self.config.data["cat"] is None:
+            return None
+        save_path = self.config.data["cat"].get(category)
+        if not isinstance(save_path, str) or any(character in save_path for character in "*?["):
+            return None
+        return os.path.join(save_path, "")
+
+    def get_all_torrents(self):
+        """Get the full torrent list from qBittorrent; cached once per run by the constructor."""
+        return self.get_torrents({})
+
+    def _directory_peer_hashes(self, save_path):
+        """Get the hashes of every torrent whose save path can collide with the provided one."""
+        return [torrent.hash for torrent in self.get_all_torrents() if _paths_overlap(save_path, torrent.save_path)]
+
+    def directory_peers(self, save_path, exclude_hash):
+        """Get the hashes of the torrents that share, contain or are contained by save_path.
+
+        Returns None when the torrent list cannot be read, which is not the same as no peers.
+        """
+        try:
+            peer_hashes = self._directory_peer_hashes(save_path)
+        except Exception as exc:
+            logger.warning(f"Unable to read the torrent list for {save_path}: {exc}")
+            return None
+        return [torrent_hash for torrent_hash in peer_hashes if torrent_hash != exclude_hash]
+
+    def torrent_file_paths(self, torrent_hash):
+        """Get the set of full file paths for a torrent, or None when its files cannot be read."""
+        try:
+            torrent = next(torrent for torrent in self.get_all_torrents() if torrent.hash == torrent_hash)
+            return {os.path.join(torrent.save_path, file.name) for file in torrent.files}
+        except Exception as exc:
+            logger.warning(f"Unable to read the file list for {torrent_hash}: {exc}")
+            return None
+
+    def has_shared_files(self, torrent_hash, save_path):
+        """Check whether a directory peer shares a file path with the torrent; fails closed."""
+        peer_hashes = self.directory_peers(save_path, torrent_hash)
+        if peer_hashes is None:
+            return True
+        torrent_paths = self.torrent_file_paths(torrent_hash)
+        if torrent_paths is None:
+            return True
+        for peer_hash in peer_hashes:
+            peer_paths = self.torrent_file_paths(peer_hash)
+            if peer_paths is None:
+                return True
+            if torrent_paths & peer_paths:
+                return True
+        return False
+
+    def relocate_torrent(self, torrent, target):
+        """Move a torrent to the target path and report whether the move was issued."""
+
+        @handle_qbit_api_errors(context="set_location", retry_attempts=2)
+        def set_location():
+            torrent.set_location(location=target)
+            return True
+
+        return set_location() is True
 
     def tor_delete_recycle(self, torrent, info):
         """Move torrent to recycle bin"""
